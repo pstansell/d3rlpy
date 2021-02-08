@@ -28,7 +28,7 @@ See more information at :doc:`/installation`.
 Prepare Dataset
 ---------------
 
-You can make your own dataset without any efforts.
+You can make your own dataset without any effort.
 In this tutorial, let's use integrated datasets to start.
 If you want to make a new dataset, see :doc:`references/dataset`.
 
@@ -65,7 +65,7 @@ Setup Algorithm
 ---------------
 
 There are many algorithms avaiable in d3rlpy.
-Since CartPole is the simple task, let's start from ``DQN``, which is the
+Since CartPole is the simple task, let's start with ``DQN``, which is the
 Q-learnig algorithm proposed as the first deep reinforcement learning algorithm.
 
 .. code-block:: python
@@ -85,7 +85,7 @@ Setup Metrics
 -------------
 
 Collecting evaluation metrics is important to train algorithms properly.
-In d3rlpy, the metrics is computed through scikit-learn style scorer functions.
+In d3rlpy, the metrics are computed through scikit-learn style scorer functions.
 
 .. code-block:: python
 
@@ -96,7 +96,7 @@ In d3rlpy, the metrics is computed through scikit-learn style scorer functions.
   td_error = td_error_scorer(dqn, test_episodes)
 
 Since evaluating algorithms without access to environment is still difficult,
-the algorithm can be directly evaluated with ``evaluate_on_environment`` function
+the algorithm can be evaluated directly with the ``evaluate_on_environment`` function
 if the environment is available to interact.
 
 .. code-block:: python
@@ -115,7 +115,7 @@ See more metrics and configurations at :doc:`references/metrics`.
 Start Training
 --------------
 
-Now, you have all to start data-driven training.
+Now, you have all you need to start data-driven training.
 
 .. code-block:: python
 

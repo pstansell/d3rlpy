@@ -10,10 +10,10 @@ label data :math:`Y`.
 However, in reinforcement learning, mini-batches consist with sets of
 :math:`(s_t, a_t, r_{t+1}, s_{t+1})` and episode terminal flags.
 Converting a set of observations, actions, rewards and terminal flags into this
-tuples is boring and requires some codings.
+tuples is boring and requires some coding.
 
 Therefore, d3rlpy provides `MDPDataset` class which enables you to handle
-reinforcement learning datasets without any efforts.
+reinforcement learning datasets without any effort.
 
 .. code-block:: python
 

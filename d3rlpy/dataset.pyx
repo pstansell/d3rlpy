@@ -736,7 +736,7 @@ cdef class Transition:
     """ Transition class.
 
     This class is designed to hold data between two time steps, which is
-    usually used as inputs of loss calculation in reinforcement learning.
+    usually used as input to the loss calculation in reinforcement learning.
 
     Args:
         observation_shape (tuple): observation shape.
