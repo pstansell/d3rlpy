@@ -88,6 +88,7 @@ class MDPDataset:
 
     .. code-block:: python
 
+        import numpy as np
         from d3rlpy.dataset import MDPDataset
 
         # 1000 steps of observations with shape of (100,)
@@ -101,7 +102,7 @@ class MDPDataset:
 
         dataset = MDPDataset(observations, actions, rewards, terminals)
 
-    The MDPDataset object automatically splits the given data into list of
+    The MDPDataset object automatically splits the given data into a list of
     :class:`d3rlpy.dataset.Episode` objects.
     Furthermore, the MDPDataset object behaves like a list in order to use with
     scikit-learn utilities.
