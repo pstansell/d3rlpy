@@ -65,6 +65,9 @@ class AWAC(AlgoBase):
         n_critics (int): the number of Q functions for ensemble.
         bootstrap (bool): flag to bootstrap Q functions.
         share_encoder (bool): flag to share encoder network.
+        target_reduction_type (str): ensemble reduction method at target value
+            estimation. The available options are
+            ``['min', 'max', 'mean', 'mix', 'none']``.
         update_actor_interval (int): interval to update policy function.
         use_gpu (bool, int or d3rlpy.gpu.Device):
             flag to use GPU, device ID or device.
@@ -91,9 +94,10 @@ class AWAC(AlgoBase):
     _lam: float
     _n_action_samples: int
     _max_weight: float
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
+    _target_reduction_type: str
     _update_actor_interval: int
     _use_gpu: Optional[Device]
     _augmentation: AugmentationPipeline
@@ -120,6 +124,7 @@ class AWAC(AlgoBase):
         n_critics: int = 2,
         bootstrap: bool = False,
         share_encoder: bool = False,
+        target_reduction_type: str = "min",
         update_actor_interval: int = 1,
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
@@ -149,9 +154,10 @@ class AWAC(AlgoBase):
         self._lam = lam
         self._n_action_samples = n_action_samples
         self._max_weight = max_weight
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
+        self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
         self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
@@ -178,6 +184,7 @@ class AWAC(AlgoBase):
             n_critics=self._n_critics,
             bootstrap=self._bootstrap,
             share_encoder=self._share_encoder,
+            target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=self._action_scaler,
@@ -196,6 +203,7 @@ class AWAC(AlgoBase):
             batch.next_observations,
             batch.terminals,
             batch.n_steps,
+            batch.masks,
         )
         # delayed policy update
         if total_step % self._update_actor_interval == 0:

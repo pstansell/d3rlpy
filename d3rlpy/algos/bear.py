@@ -132,8 +132,8 @@ class BEAR(AlgoBase):
     _imitator_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
     _tau: float
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
     _initial_temperature: float
     _initial_alpha: float
@@ -212,8 +212,8 @@ class BEAR(AlgoBase):
         self._imitator_encoder_factory = check_encoder(imitator_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
         self._tau = tau
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
         self._initial_temperature = initial_temperature
         self._initial_alpha = initial_alpha
@@ -282,6 +282,7 @@ class BEAR(AlgoBase):
             batch.next_observations,
             batch.terminals,
             batch.n_steps,
+            batch.masks,
         )
 
         if epoch < self._warmup_epochs:

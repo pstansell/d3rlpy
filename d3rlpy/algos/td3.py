@@ -67,6 +67,9 @@ class TD3(AlgoBase):
         n_critics (int): the number of Q functions for ensemble.
         bootstrap (bool): flag to bootstrap Q functions.
         share_encoder (bool): flag to share encoder network.
+        target_reduction_type (str): ensemble reduction method at target value
+            estimation. The available options are
+            ``['min', 'max', 'mean', 'mix', 'none']``.
         target_smoothing_sigma (float): standard deviation for target noise.
         target_smoothing_clip (float): clipping range for target noise.
         update_actor_interval (int): interval to update policy function
@@ -93,9 +96,10 @@ class TD3(AlgoBase):
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
     _tau: float
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
+    _target_reduction_type: str
     _target_smoothing_sigma: float
     _target_smoothing_clip: float
     _update_actor_interval: int
@@ -121,6 +125,7 @@ class TD3(AlgoBase):
         n_critics: int = 2,
         bootstrap: bool = False,
         share_encoder: bool = False,
+        target_reduction_type: str = "min",
         target_smoothing_sigma: float = 0.2,
         target_smoothing_clip: float = 0.5,
         update_actor_interval: int = 2,
@@ -149,9 +154,10 @@ class TD3(AlgoBase):
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
         self._tau = tau
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
+        self._target_reduction_type = target_reduction_type
         self._target_smoothing_sigma = target_smoothing_sigma
         self._target_smoothing_clip = target_smoothing_clip
         self._update_actor_interval = update_actor_interval
@@ -177,6 +183,7 @@ class TD3(AlgoBase):
             n_critics=self._n_critics,
             bootstrap=self._bootstrap,
             share_encoder=self._share_encoder,
+            target_reduction_type=self._target_reduction_type,
             target_smoothing_sigma=self._target_smoothing_sigma,
             target_smoothing_clip=self._target_smoothing_clip,
             use_gpu=self._use_gpu,
@@ -197,6 +204,7 @@ class TD3(AlgoBase):
             batch.next_observations,
             batch.terminals,
             batch.n_steps,
+            batch.masks,
         )
         # delayed policy update
         if total_step % self._update_actor_interval == 0:

@@ -82,6 +82,9 @@ class SAC(AlgoBase):
         n_critics (int): the number of Q functions for ensemble.
         bootstrap (bool): flag to bootstrap Q functions.
         share_encoder (bool): flag to share encoder network.
+        target_reduction_type (str): ensemble reduction method at target value
+            estimation. The available options are
+            ``['min', 'max', 'mean', 'mix', 'none']``.
         update_actor_interval (int): interval to update policy function.
         initial_temperature (float): initial temperature value.
         use_gpu (bool, int or d3rlpy.gpu.Device):
@@ -108,9 +111,10 @@ class SAC(AlgoBase):
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
     _tau: float
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
+    _target_reduction_type: str
     _update_actor_interval: int
     _initial_temperature: float
     _augmentation: AugmentationPipeline
@@ -137,6 +141,7 @@ class SAC(AlgoBase):
         n_critics: int = 2,
         bootstrap: bool = False,
         share_encoder: bool = False,
+        target_reduction_type: str = "min",
         update_actor_interval: int = 1,
         initial_temperature: float = 1.0,
         use_gpu: UseGPUArg = False,
@@ -166,9 +171,10 @@ class SAC(AlgoBase):
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
         self._tau = tau
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
+        self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
         self._initial_temperature = initial_temperature
         self._augmentation = check_augmentation(augmentation)
@@ -195,6 +201,7 @@ class SAC(AlgoBase):
             n_critics=self._n_critics,
             bootstrap=self._bootstrap,
             share_encoder=self._share_encoder,
+            target_reduction_type=self._target_reduction_type,
             initial_temperature=self._initial_temperature,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
@@ -215,6 +222,7 @@ class SAC(AlgoBase):
             batch.next_observations,
             batch.terminals,
             batch.n_steps,
+            batch.masks,
         )
 
         # delayed policy update
@@ -316,8 +324,8 @@ class DiscreteSAC(AlgoBase):
     _actor_encoder_factory: EncoderFactory
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
     _initial_temperature: float
     _target_update_interval: int
@@ -371,8 +379,8 @@ class DiscreteSAC(AlgoBase):
         self._actor_encoder_factory = check_encoder(actor_encoder_factory)
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
         self._initial_temperature = initial_temperature
         self._target_update_interval = target_update_interval
@@ -418,6 +426,7 @@ class DiscreteSAC(AlgoBase):
             batch.next_observations,
             batch.terminals,
             batch.n_steps,
+            batch.masks,
         )
 
         actor_loss = self._impl.update_actor(batch.observations)

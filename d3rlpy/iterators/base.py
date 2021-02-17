@@ -1,5 +1,7 @@
 from abc import ABCMeta, abstractmethod
-from typing import List, Iterator
+from typing import Dict, List, Iterator
+
+import numpy as np
 
 from ..dataset import Episode, Transition, TransitionMiniBatch
 
@@ -10,6 +12,7 @@ class TransitionIterator(metaclass=ABCMeta):
     _transitions: List[Transition]
     _orig_transitions: List[Transition]
     _ephemeral_transitions: List[Transition]
+    _masks: Dict[Transition, np.ndarray]
     _batch_size: int
     _n_steps: int
     _gamma: float

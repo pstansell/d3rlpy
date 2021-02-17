@@ -367,23 +367,6 @@ class LearnableBase:
             shuffle=shuffle,
         )
 
-        # initialize scaler
-        if self._scaler:
-            self._scaler.fit(episodes)
-
-        # initialize action scaler
-        if self._action_scaler:
-            self._action_scaler.fit(episodes)
-
-        # instantiate implementation
-        if self._impl is None:
-            transition = iterator.transitions[0]
-            action_size = transition.get_action_size()
-            observation_shape = tuple(transition.get_observation_shape())
-            self.create_impl(
-                self._process_observation_shape(observation_shape), action_size
-            )
-
         # setup logger
         logger = self._prepare_logger(
             save_metrics,
@@ -396,6 +379,30 @@ class LearnableBase:
 
         # add reference to active logger to algo class during fit
         self._active_logger = logger
+
+        # initialize scaler
+        if self._scaler:
+            logger.debug("Fitting scaler...", scaler=self._scaler.get_type())
+            self._scaler.fit(episodes)
+
+        # initialize action scaler
+        if self._action_scaler:
+            logger.debug(
+                "Fitting action scaler...",
+                action_scaler=self._action_scaler.get_type(),
+            )
+            self._action_scaler.fit(episodes)
+
+        # instantiate implementation
+        if self._impl is None:
+            logger.debug("Building model...")
+            transition = iterator.transitions[0]
+            action_size = transition.get_action_size()
+            observation_shape = tuple(transition.get_observation_shape())
+            self.create_impl(
+                self._process_observation_shape(observation_shape), action_size
+            )
+            logger.debug("Model has been built.")
 
         # save hyperparameters
         self.save_params(logger)

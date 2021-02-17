@@ -45,6 +45,9 @@ class DQN(AlgoBase):
         n_critics (int): the number of Q functions for ensemble.
         bootstrap (bool): flag to bootstrap Q functions.
         share_encoder (bool): flag to share encoder network.
+        target_reduction_type (str): ensemble reduction method at target value
+            estimation. The available options are
+            ``['min', 'max', 'mean', 'mix', 'none']``.
         target_update_interval (int): interval to update the target network.
         use_gpu (bool, int or d3rlpy.gpu.Device):
             flag to use GPU, device ID or device.
@@ -62,9 +65,10 @@ class DQN(AlgoBase):
     _optim_factory: OptimizerFactory
     _encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
+    _target_reduction_type: str
     _target_update_interval: int
     _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
@@ -84,6 +88,7 @@ class DQN(AlgoBase):
         n_critics: int = 1,
         bootstrap: bool = False,
         share_encoder: bool = False,
+        target_reduction_type: str = "min",
         target_update_interval: int = 8000,
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
@@ -105,9 +110,10 @@ class DQN(AlgoBase):
         self._optim_factory = optim_factory
         self._encoder_factory = check_encoder(encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
+        self._target_reduction_type = target_reduction_type
         self._target_update_interval = target_update_interval
         self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
@@ -127,6 +133,7 @@ class DQN(AlgoBase):
             n_critics=self._n_critics,
             bootstrap=self._bootstrap,
             share_encoder=self._share_encoder,
+            target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             augmentation=self._augmentation,
@@ -144,6 +151,7 @@ class DQN(AlgoBase):
             batch.next_observations,
             batch.terminals,
             batch.n_steps,
+            batch.masks,
         )
         if total_step % self._target_update_interval == 0:
             self._impl.update_target()
@@ -189,6 +197,9 @@ class DoubleDQN(DQN):
         n_critics (int): the number of Q functions.
         bootstrap (bool): flag to bootstrap Q functions.
         share_encoder (bool): flag to share encoder network.
+        target_reduction_type (str): ensemble reduction method at target value
+            estimation. The available options are
+            ``['min', 'max', 'mean', 'mix', 'none']``.
         target_update_interval (int): interval to synchronize the target
             network.
         use_gpu (bool, int or d3rlpy.gpu.Device):
@@ -220,6 +231,7 @@ class DoubleDQN(DQN):
             n_critics=self._n_critics,
             bootstrap=self._bootstrap,
             share_encoder=self._share_encoder,
+            target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             augmentation=self._augmentation,

@@ -67,7 +67,12 @@ class AlgoBase(LearnableBase):
         generator: Optional[DataGenerator],
     ):
         super().__init__(
-            batch_size, n_frames, n_steps, gamma, scaler, action_scaler
+            batch_size,
+            n_frames,
+            n_steps,
+            gamma,
+            scaler,
+            action_scaler,
         )
         self._generator = generator
 

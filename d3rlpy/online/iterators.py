@@ -72,18 +72,27 @@ class _AlgoProtocol(Protocol):
         ...
 
 
-def _setup_algo(algo: _AlgoProtocol, env: gym.Env) -> None:
+def _setup_algo(
+    algo: _AlgoProtocol, env: gym.Env, logger: D3RLPyLogger
+) -> None:
     # initialize scaler
     if algo.scaler:
+        logger.debug("Fitting scaler...", scler=algo.scaler.get_type())
         algo.scaler.fit_with_env(env)
 
     # initialize action scaler
     if algo.action_scaler:
+        logger.debug(
+            "Fitting action scaler...",
+            action_scler=algo.action_scaler.get_type(),
+        )
         algo.action_scaler.fit_with_env(env)
 
     # setup algorithm
     if algo.impl is None:
+        logger.debug("Building model...")
         algo.build_with_env(env)
+        logger.debug("Model has been built.")
 
 
 def train_single_env(
@@ -137,9 +146,6 @@ def train_single_env(
             incorporate with ``gym.wrappers.TimeLimit``.
 
     """
-    # initialize algorithm parameters
-    _setup_algo(algo, env)
-
     # setup logger
     if experiment_name is None:
         experiment_name = algo.__class__.__name__ + "_online"
@@ -152,6 +158,9 @@ def train_single_env(
         tensorboard=tensorboard,
         with_timestamp=with_timestamp,
     )
+
+    # initialize algorithm parameters
+    _setup_algo(algo, env, logger)
 
     observation_shape = env.observation_space.shape
     is_image = len(observation_shape) == 3
@@ -311,9 +320,6 @@ def train_batch_env(
             incorporate with ``gym.wrappers.TimeLimit``.
 
     """
-    # initialize algorithm parameters
-    _setup_algo(algo, env)
-
     # setup logger
     if experiment_name is None:
         experiment_name = algo.__class__.__name__ + "_online"
@@ -326,6 +332,9 @@ def train_batch_env(
         tensorboard=tensorboard,
         with_timestamp=with_timestamp,
     )
+
+    # initialize algorithm parameters
+    _setup_algo(algo, env, logger)
 
     observation_shape = env.observation_space.shape
     is_image = len(observation_shape) == 3

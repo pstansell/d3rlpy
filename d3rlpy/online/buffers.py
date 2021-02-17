@@ -96,15 +96,19 @@ class _Buffer(metaclass=ABCMeta):
     _transitions: FIFOQueue[Transition]
     _observation_shape: Sequence[int]
     _action_size: int
+    _create_mask: bool
+    _mask_size: int
 
     def __init__(
         self,
         maxlen: int,
         env: Optional[gym.Env] = None,
         episodes: Optional[List[Episode]] = None,
+        create_mask: bool = False,
+        mask_size: int = 1,
     ):
-        # remove links when dropping the last transition
         def drop_callback(transition: Transition) -> None:
+            # remove links when dropping the last transition
             if transition.next_transition is None:
                 trace_back_and_clear(transition)
 
@@ -122,6 +126,8 @@ class _Buffer(metaclass=ABCMeta):
 
         self._observation_shape = observation_shape
         self._action_size = action_size
+        self._create_mask = create_mask
+        self._mask_size = mask_size
 
         # add initial transitions
         if episodes:
@@ -139,6 +145,9 @@ class _Buffer(metaclass=ABCMeta):
         assert episode.get_action_size() == self._action_size
         for transition in episode.transitions:
             self._transitions.append(transition)
+            # add mask if necessary
+            if self._create_mask and transition.mask is None:
+                transition.mask = np.random.randint(2, size=self._mask_size)
 
     @abstractmethod
     def sample(
@@ -239,6 +248,8 @@ class _Buffer(metaclass=ABCMeta):
             rewards=rewards,
             terminals=terminals,
             episode_terminals=episode_terminals,
+            create_mask=self._create_mask,
+            mask_size=self._mask_size,
         )
 
     def __len__(self) -> int:
@@ -320,7 +331,8 @@ class BasicSampleMixin:
     ) -> TransitionMiniBatch:
         indices = np.random.choice(len(self._transitions), batch_size)
         transitions = [self._transitions[index] for index in indices]
-        return TransitionMiniBatch(transitions, n_frames, n_steps, gamma)
+        batch = TransitionMiniBatch(transitions, n_frames, n_steps, gamma)
+        return batch
 
 
 class ReplayBuffer(BasicSampleMixin, Buffer):
@@ -330,7 +342,9 @@ class ReplayBuffer(BasicSampleMixin, Buffer):
         maxlen (int): the maximum number of data length.
         env (gym.Env): gym-like environment to extract shape information.
         episodes (list(d3rlpy.dataset.Episode)): list of episodes to
-            initialize buffer
+            initialize buffer.
+        create_mask (bool): flag to create bootstrapping mask.
+        mask_size (int): ensemble size for binary mask.
 
     """
 
@@ -344,8 +358,10 @@ class ReplayBuffer(BasicSampleMixin, Buffer):
         maxlen: int,
         env: Optional[gym.Env] = None,
         episodes: Optional[List[Episode]] = None,
+        create_mask: bool = False,
+        mask_size: int = 1,
     ):
-        super().__init__(maxlen, env, episodes)
+        super().__init__(maxlen, env, episodes, create_mask, mask_size)
         self._prev_observation = None
         self._prev_action = None
         self._prev_reward = 0.0
@@ -378,6 +394,12 @@ class ReplayBuffer(BasicSampleMixin, Buffer):
             if isinstance(terminal, bool):
                 terminal = 1.0 if terminal else 0.0
 
+            # create binary mask
+            if self._create_mask:
+                mask = np.random.randint(2, size=self._mask_size)
+            else:
+                mask = None
+
             transition = Transition(
                 observation_shape=self._observation_shape,
                 action_size=self._action_size,
@@ -388,6 +410,7 @@ class ReplayBuffer(BasicSampleMixin, Buffer):
                 next_action=action,
                 next_reward=reward,
                 terminal=terminal,
+                mask=mask,
                 prev_transition=self._prev_transition,
             )
 
@@ -417,6 +440,8 @@ class BatchReplayBuffer(BasicSampleMixin, BatchBuffer):
         env (gym.Env): gym-like environment to extract shape information.
         episodes (list(d3rlpy.dataset.Episode)): list of episodes to
             initialize buffer
+        create_mask (bool): flag to create bootstrapping mask.
+        mask_size (int): ensemble size for binary mask.
 
     """
 
@@ -431,8 +456,10 @@ class BatchReplayBuffer(BasicSampleMixin, BatchBuffer):
         maxlen: int,
         env: BatchEnv,
         episodes: Optional[List[Episode]] = None,
+        create_mask: bool = False,
+        mask_size: int = 1,
     ):
-        super().__init__(maxlen, env, episodes)
+        super().__init__(maxlen, env, episodes, create_mask, mask_size)
         self._n_envs = len(env)
         self._prev_observations = [None for _ in range(len(env))]
         self._prev_actions = [None for _ in range(len(env))]
@@ -471,6 +498,12 @@ class BatchReplayBuffer(BasicSampleMixin, BatchBuffer):
                 prev_reward = cast(np.ndarray, self._prev_rewards[i])
                 prev_transition = self._prev_transitions[i]
 
+                # create binary mask
+                if self._create_mask:
+                    mask = np.random.randint(2, size=self._mask_size)
+                else:
+                    mask = None
+
                 transition = Transition(
                     observation_shape=self._observation_shape,
                     action_size=self._action_size,
@@ -481,6 +514,7 @@ class BatchReplayBuffer(BasicSampleMixin, BatchBuffer):
                     next_action=actions[i],
                     next_reward=float(rewards[i]),
                     terminal=float(terminals[i]),
+                    mask=mask,
                     prev_transition=prev_transition,
                 )
 

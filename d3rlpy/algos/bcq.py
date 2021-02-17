@@ -154,8 +154,8 @@ class BCQ(AlgoBase):
     _imitator_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
     _tau: float
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
     _update_actor_interval: int
     _lam: float
@@ -224,8 +224,8 @@ class BCQ(AlgoBase):
         self._imitator_encoder_factory = check_encoder(imitator_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
         self._tau = tau
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
         self._update_actor_interval = update_actor_interval
         self._lam = lam
@@ -287,6 +287,7 @@ class BCQ(AlgoBase):
                 batch.next_observations,
                 batch.terminals,
                 batch.n_steps,
+                batch.masks,
             )
             if total_step % self._update_actor_interval == 0:
                 actor_loss = self._impl.update_actor(batch.observations)
@@ -361,6 +362,9 @@ class DiscreteBCQ(AlgoBase):
         n_critics (int): the number of Q functions for ensemble.
         bootstrap (bool): flag to bootstrap Q functions.
         share_encoder (bool): flag to share encoder network.
+        target_reduction_type (str): ensemble reduction method at target value
+            estimation. The available options are
+            ``['min', 'max', 'mean', 'mix', 'none']``.
         action_flexibility (float): probability threshold represented as
             :math:`\tau`.
         beta (float): reguralization term for imitation function.
@@ -382,9 +386,10 @@ class DiscreteBCQ(AlgoBase):
     _optim_factory: OptimizerFactory
     _encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _n_critics: int
     _bootstrap: bool
+    _n_critics: int
     _share_encoder: bool
+    _target_reduction_type: str
     _action_flexibility: float
     _beta: float
     _target_update_interval: int
@@ -406,6 +411,7 @@ class DiscreteBCQ(AlgoBase):
         n_critics: int = 1,
         bootstrap: bool = False,
         share_encoder: bool = False,
+        target_reduction_type: str = "min",
         action_flexibility: float = 0.3,
         beta: float = 0.5,
         target_update_interval: int = 8000,
@@ -429,9 +435,10 @@ class DiscreteBCQ(AlgoBase):
         self._optim_factory = optim_factory
         self._encoder_factory = check_encoder(encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._n_critics = n_critics
         self._bootstrap = bootstrap
+        self._n_critics = n_critics
         self._share_encoder = share_encoder
+        self._target_reduction_type = target_reduction_type
         self._action_flexibility = action_flexibility
         self._beta = beta
         self._target_update_interval = target_update_interval
@@ -453,6 +460,7 @@ class DiscreteBCQ(AlgoBase):
             n_critics=self._n_critics,
             bootstrap=self._bootstrap,
             share_encoder=self._share_encoder,
+            target_reduction_type=self._target_reduction_type,
             action_flexibility=self._action_flexibility,
             beta=self._beta,
             use_gpu=self._use_gpu,
@@ -473,6 +481,7 @@ class DiscreteBCQ(AlgoBase):
             batch.next_observations,
             batch.terminals,
             batch.n_steps,
+            batch.masks,
         )
         if total_step % self._target_update_interval == 0:
             self._impl.update_target()
