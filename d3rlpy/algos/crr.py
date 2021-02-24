@@ -1,44 +1,67 @@
 from typing import Any, List, Optional, Sequence
 from .base import AlgoBase, DataGenerator
-from .torch.awac_impl import AWACImpl
+from .torch.crr_impl import CRRImpl
+from ..augmentation import AugmentationPipeline
 from ..dataset import TransitionMiniBatch
-from ..models.optimizers import OptimizerFactory, AdamFactory
 from ..models.encoders import EncoderFactory
 from ..models.q_functions import QFunctionFactory
-from ..augmentation import AugmentationPipeline
+from ..models.optimizers import OptimizerFactory, AdamFactory
 from ..gpu import Device
-from ..argument_utility import ScalerArg, ActionScalerArg
 from ..argument_utility import check_encoder, EncoderArg
 from ..argument_utility import check_use_gpu, UseGPUArg
-from ..argument_utility import check_q_func, QFuncArg
 from ..argument_utility import check_augmentation, AugmentationArg
+from ..argument_utility import check_q_func, QFuncArg
+from ..argument_utility import ScalerArg, ActionScalerArg
 from ..constants import IMPL_NOT_INITIALIZED_ERROR
 
 
-class AWAC(AlgoBase):
-    r"""Advantage Weighted Actor-Critic algorithm.
+class CRR(AlgoBase):
+    r"""Critic Reguralized Regression algorithm.
 
-    AWAC is a TD3-based actor-critic algorithm that enables efficient
-    fine-tuning where the policy is trained with offline datasets and is
-    deployed to online training.
+    CRR is a simple offline RL method similar to AWAC.
 
     The policy is trained as a supervised regression.
 
     .. math::
 
         J(\phi) = \mathbb{E}_{s_t, a_t \sim D}
-            [\log \pi_\phi(a_t|s_t)
-                \exp(\frac{1}{\lambda} A^\pi (s_t, a_t))]
+            [\log \pi_\phi(a_t|s_t) f(Q_\theta, \pi_\phi, s_t, a_t)]
 
-    where :math:`A^\pi (s_t, a_t) = Q_\theta(s_t, a_t) -
-    Q_\theta(s_t, a'_t)` and :math:`a'_t \sim \pi_\phi(\cdot|s_t)`
+    where :math:`f` is a filter function which has several options. The first
+    option is ``binary`` function.
 
-    The key difference from AWR is that AWAC uses Q-function trained via TD
-    learning for the better sample-efficiency.
+    .. math::
+
+        f := \mathbb{1} [A_\theta(s, a) > 0]
+
+    The other is ``exp`` function.
+
+    .. math::
+
+        f := \exp(A(s, a) / \beta)
+
+    The :math:`A(s, a)` is an average function which also has several options.
+    The first option is ``mean``.
+
+    .. math::
+
+        A(s, a) = Q_\theta (s, a) - \frac{1}{m} \sum^m_j Q(s, a_j)
+
+    The other one is ``max``.
+
+    .. math::
+
+        A(s, a) = Q_\theta (s, a) - \max^m_j Q(s, a_j)
+
+    where :math:`a_j \sim \pi_\phi(s)`.
+
+    In evaluation, the action is determined by Critic Weighted Policy (CWP).
+    In CWP, the several actions are sampled from the policy function, and the
+    final action is re-sampled from the estimated action-value distribution.
 
     References:
-        * `Nair et al., Accelerating Online Reinforcement Learning with Offline
-          Datasets. <https://arxiv.org/abs/2006.09359>`_
+        * `Wang et al., Critic Reguralized Regression.
+          <https://arxiv.org/abs/2006.15134>`_
 
     Args:
         actor_learning_rate (float): learning rate for policy function.
@@ -57,10 +80,13 @@ class AWAC(AlgoBase):
         n_frames (int): the number of frames to stack for image observation.
         n_steps (int): N-step TD calculation.
         gamma (float): discount factor.
-        tau (float): target network synchronization coefficiency.
-        lam (float): :math:`\lambda` for weight calculation.
+        beta (float): temperature value defined as :math:`\beta` above.
         n_action_samples (int): the number of sampled actions to calculate
-            :math:`A^\pi(s_t, a_t)`.
+            :math:`A(s, a)` and for CWP.
+        advantage_type (str): advantage function type. The available options
+            are ``['mean', 'max']``.
+        weight_type (str): filter function type. The available options
+            are ``['binary', 'exp']``.
         max_weight (float): maximum weight for cross-entropy loss.
         n_critics (int): the number of Q functions for ensemble.
         bootstrap (bool): flag to bootstrap Q functions.
@@ -79,7 +105,7 @@ class AWAC(AlgoBase):
             augmentation pipeline.
         generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
             (e.g. model-based RL).
-        impl (d3rlpy.algos.torch.awac_impl.AWACImpl): algorithm implementation.
+        impl (d3rlpy.algos.torch.crr_impl.CRRImpl): algorithm implementation.
 
     """
 
@@ -90,40 +116,44 @@ class AWAC(AlgoBase):
     _actor_encoder_factory: EncoderFactory
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _tau: float
-    _lam: float
-    _n_action_samples: int
-    _max_weight: float
     _bootstrap: bool
+    _beta: float
+    _n_action_samples: int
+    _advantage_type: str
+    _weight_type: str
+    _max_weight: float
     _n_critics: int
     _share_encoder: bool
+    _target_update_interval: int
     _target_reduction_type: str
     _update_actor_interval: int
-    _use_gpu: Optional[Device]
     _augmentation: AugmentationPipeline
-    _impl: Optional[AWACImpl]
+    _use_gpu: Optional[Device]
+    _impl: Optional[CRRImpl]
 
     def __init__(
         self,
         *,
         actor_learning_rate: float = 3e-4,
         critic_learning_rate: float = 3e-4,
-        actor_optim_factory: OptimizerFactory = AdamFactory(weight_decay=1e-4),
+        actor_optim_factory: OptimizerFactory = AdamFactory(),
         critic_optim_factory: OptimizerFactory = AdamFactory(),
         actor_encoder_factory: EncoderArg = "default",
         critic_encoder_factory: EncoderArg = "default",
         q_func_factory: QFuncArg = "mean",
-        batch_size: int = 1024,
+        batch_size: int = 100,
         n_frames: int = 1,
         n_steps: int = 1,
         gamma: float = 0.99,
-        tau: float = 0.005,
-        lam: float = 1.0,
-        n_action_samples: int = 1,
+        beta: float = 1.0,
+        n_action_samples: int = 4,
+        advantage_type: str = "mean",
+        weight_type: str = "exp",
         max_weight: float = 20.0,
-        n_critics: int = 2,
+        n_critics: int = 1,
         bootstrap: bool = False,
         share_encoder: bool = False,
+        target_update_interval: int = 100,
         target_reduction_type: str = "min",
         update_actor_interval: int = 1,
         use_gpu: UseGPUArg = False,
@@ -131,7 +161,7 @@ class AWAC(AlgoBase):
         action_scaler: ActionScalerArg = None,
         augmentation: AugmentationArg = None,
         generator: Optional[DataGenerator] = None,
-        impl: Optional[AWACImpl] = None,
+        impl: Optional[CRRImpl] = None,
         **kwargs: Any
     ):
         super().__init__(
@@ -150,13 +180,15 @@ class AWAC(AlgoBase):
         self._actor_encoder_factory = check_encoder(actor_encoder_factory)
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._tau = tau
-        self._lam = lam
-        self._n_action_samples = n_action_samples
-        self._max_weight = max_weight
         self._bootstrap = bootstrap
+        self._beta = beta
+        self._n_action_samples = n_action_samples
+        self._advantage_type = advantage_type
+        self._weight_type = weight_type
+        self._max_weight = max_weight
         self._n_critics = n_critics
         self._share_encoder = share_encoder
+        self._target_update_interval = target_update_interval
         self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
         self._augmentation = check_augmentation(augmentation)
@@ -166,7 +198,7 @@ class AWAC(AlgoBase):
     def create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
-        self._impl = AWACImpl(
+        self._impl = CRRImpl(
             observation_shape=observation_shape,
             action_size=action_size,
             actor_learning_rate=self._actor_learning_rate,
@@ -177,9 +209,10 @@ class AWAC(AlgoBase):
             critic_encoder_factory=self._critic_encoder_factory,
             q_func_factory=self._q_func_factory,
             gamma=self._gamma,
-            tau=self._tau,
-            lam=self._lam,
+            beta=self._beta,
             n_action_samples=self._n_action_samples,
+            advantage_type=self._advantage_type,
+            weight_type=self._weight_type,
             max_weight=self._max_weight,
             n_critics=self._n_critics,
             bootstrap=self._bootstrap,
@@ -196,6 +229,7 @@ class AWAC(AlgoBase):
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
     ) -> List[Optional[float]]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
+
         critic_loss = self._impl.update_critic(
             batch.observations,
             batch.actions,
@@ -205,16 +239,14 @@ class AWAC(AlgoBase):
             batch.n_steps,
             batch.masks,
         )
-        # delayed policy update
-        if total_step % self._update_actor_interval == 0:
-            actor_loss, mean_std = self._impl.update_actor(
-                batch.observations, batch.actions
-            )
+
+        actor_loss = self._impl.update_actor(batch.observations, batch.actions)
+
+        if total_step % self._target_update_interval == 0:
             self._impl.update_critic_target()
             self._impl.update_actor_target()
-        else:
-            actor_loss, mean_std = None, None
-        return [critic_loss, actor_loss, mean_std]
+
+        return [critic_loss, actor_loss]
 
     def get_loss_labels(self) -> List[str]:
-        return ["critic_loss", "actor_loss", "mean_std"]
+        return ["critic_loss", "actor_loss"]
