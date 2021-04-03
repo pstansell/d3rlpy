@@ -1,15 +1,14 @@
-import os
 import json
+import os
 import time
-
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Iterator
+from typing import Any, Dict, Iterator, List, Optional
 
 import numpy as np
 import structlog
-from typing_extensions import Protocol
 from tensorboardX import SummaryWriter
+from typing_extensions import Protocol
 
 
 class _SaveProtocol(Protocol):
@@ -28,6 +27,9 @@ def default_json_encoder(obj: Any) -> Any:
     raise TypeError
 
 
+LOG: structlog.BoundLogger = structlog.get_logger(__name__)
+
+
 class D3RLPyLogger:
 
     _experiment_name: str
@@ -37,20 +39,18 @@ class D3RLPyLogger:
     _metrics_buffer: Dict[str, List[float]]
     _params: Optional[Dict[str, float]]
     _writer: Optional[SummaryWriter]
-    _logger: structlog.BoundLogger
 
     def __init__(
         self,
         experiment_name: str,
+        tensorboard_dir: Optional[str] = None,
         save_metrics: bool = True,
         root_dir: str = "logs",
         verbose: bool = True,
-        tensorboard: bool = True,
         with_timestamp: bool = True,
     ):
         self._save_metrics = save_metrics
         self._verbose = verbose
-        self._logger = structlog.get_logger()
 
         # add timestamp to prevent unintentional overwrites
         while True:
@@ -64,7 +64,7 @@ class D3RLPyLogger:
                 self._logdir = os.path.join(root_dir, self._experiment_name)
                 if not os.path.exists(self._logdir):
                     os.makedirs(self._logdir)
-                    self._logger.info(f"Directory is created at {self._logdir}")
+                    LOG.info(f"Directory is created at {self._logdir}")
                     break
                 if with_timestamp:
                     time.sleep(1.0)
@@ -75,8 +75,10 @@ class D3RLPyLogger:
 
         self._metrics_buffer = {}
 
-        if tensorboard:
-            tfboard_path = os.path.join("runs", self._experiment_name)
+        if tensorboard_dir:
+            tfboard_path = os.path.join(
+                tensorboard_dir, "runs", self._experiment_name
+            )
             self._writer = SummaryWriter(logdir=tfboard_path)
         else:
             self._writer = None
@@ -96,11 +98,11 @@ class D3RLPyLogger:
                 f.write(json_str)
 
             if self._verbose:
-                self._logger.info(
+                LOG.info(
                     f"Parameters are saved to {params_path}", params=params
                 )
         elif self._verbose:
-            self._logger.info("Parameters", params=params)
+            LOG.info("Parameters", params=params)
 
         # remove non-scaler values for HParams
         self._params = {k: v for k, v in params.items() if np.isscalar(v)}
@@ -127,7 +129,7 @@ class D3RLPyLogger:
             metrics[name] = metric
 
         if self._verbose:
-            self._logger.info(
+            LOG.info(
                 f"{self._experiment_name}: epoch={epoch} step={step}",
                 epoch=epoch,
                 step=step,
@@ -151,7 +153,7 @@ class D3RLPyLogger:
             # save entire model
             model_path = os.path.join(self._logdir, "model_%d.pt" % epoch)
             algo.save_model(model_path)
-            self._logger.info(f"Model parameters are saved to {model_path}")
+            LOG.info(f"Model parameters are saved to {model_path}")
 
     @contextmanager
     def measure_time(self, name: str) -> Iterator[None]:
@@ -169,12 +171,3 @@ class D3RLPyLogger:
     @property
     def experiment_name(self) -> str:
         return self._experiment_name
-
-    def info(self, message: str, **kwargs: Any) -> None:
-        self._logger.info(message, **kwargs)
-
-    def debug(self, message: str, **kwargs: Any) -> None:
-        self._logger.debug(message, **kwargs)
-
-    def warning(self, message: str, **kwargs: Any) -> None:
-        self._logger.warning(message, **kwargs)

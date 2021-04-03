@@ -1,13 +1,13 @@
 from abc import abstractmethod
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from ..base import ImplBase, LearnableBase
 from ..algos import AlgoBase, DataGenerator
-from ..dataset import Transition, TransitionMiniBatch
-from ..argument_utility import ScalerArg, ActionScalerArg
+from ..argument_utility import ActionScalerArg, ScalerArg
+from ..base import ImplBase, LearnableBase
 from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..dataset import Transition, TransitionMiniBatch
 
 
 class DynamicsImplBase(ImplBase):
@@ -42,8 +42,17 @@ class DynamicsBase(DataGenerator, LearnableBase):
         horizon: int,
         scaler: ScalerArg,
         action_scaler: ActionScalerArg,
+        kwargs: Dict[str, Any],
     ):
-        super().__init__(batch_size, n_frames, 1, 1.0, scaler, action_scaler)
+        super().__init__(
+            batch_size=batch_size,
+            n_frames=n_frames,
+            n_steps=1,
+            gamma=1.0,
+            scaler=scaler,
+            action_scaler=action_scaler,
+            kwargs=kwargs,
+        )
         self._n_transitions = n_transitions
         self._horizon = horizon
         self._impl = None

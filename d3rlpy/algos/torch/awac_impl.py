@@ -6,15 +6,15 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ...models.torch import squash_action
-from ...models.builders import create_normal_policy
-from ...models.optimizers import OptimizerFactory, AdamFactory
-from ...models.encoders import EncoderFactory
-from ...models.q_functions import QFunctionFactory
-from ...gpu import Device
-from ...preprocessing import Scaler, ActionScaler
 from ...augmentation import AugmentationPipeline
-from ...torch_utility import torch_api, train_api, augmentation_api
+from ...gpu import Device
+from ...models.builders import create_squashed_normal_policy
+from ...models.encoders import EncoderFactory
+from ...models.optimizers import AdamFactory, OptimizerFactory
+from ...models.q_functions import QFunctionFactory
+from ...models.torch import squash_action
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import augmentation_api, torch_api, train_api
 from .sac_impl import SACImpl
 
 
@@ -41,8 +41,6 @@ class AWACImpl(SACImpl):
         n_action_samples: int,
         max_weight: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
@@ -64,8 +62,6 @@ class AWACImpl(SACImpl):
             gamma=gamma,
             tau=tau,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type=target_reduction_type,
             initial_temperature=1e-20,
             use_gpu=use_gpu,
@@ -78,7 +74,7 @@ class AWACImpl(SACImpl):
         self._max_weight = max_weight
 
     def _build_actor(self) -> None:
-        self._policy = create_normal_policy(
+        self._policy = create_squashed_normal_policy(
             self._observation_shape,
             self._action_size,
             self._actor_encoder_factory,

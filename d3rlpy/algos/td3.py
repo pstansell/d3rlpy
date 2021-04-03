@@ -1,18 +1,26 @@
 from typing import Any, List, Optional, Sequence
+
+from ..argument_utility import (
+    ActionScalerArg,
+    AugmentationArg,
+    EncoderArg,
+    QFuncArg,
+    ScalerArg,
+    UseGPUArg,
+    check_augmentation,
+    check_encoder,
+    check_q_func,
+    check_use_gpu,
+)
+from ..augmentation import AugmentationPipeline
+from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..dataset import TransitionMiniBatch
+from ..gpu import Device
+from ..models.encoders import EncoderFactory
+from ..models.optimizers import AdamFactory, OptimizerFactory
+from ..models.q_functions import QFunctionFactory
 from .base import AlgoBase, DataGenerator
 from .torch.td3_impl import TD3Impl
-from ..augmentation import AugmentationPipeline
-from ..dataset import TransitionMiniBatch
-from ..models.encoders import EncoderFactory
-from ..models.optimizers import OptimizerFactory, AdamFactory
-from ..models.q_functions import QFunctionFactory
-from ..gpu import Device
-from ..argument_utility import check_encoder, EncoderArg
-from ..argument_utility import check_use_gpu, UseGPUArg
-from ..argument_utility import check_augmentation, AugmentationArg
-from ..argument_utility import check_q_func, QFuncArg
-from ..argument_utility import ScalerArg, ActionScalerArg
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
 
 
 class TD3(AlgoBase):
@@ -65,8 +73,6 @@ class TD3(AlgoBase):
         gamma (float): discount factor.
         tau (float): target network synchronization coefficiency.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         target_reduction_type (str): ensemble reduction method at target value
             estimation. The available options are
             ``['min', 'max', 'mean', 'mix', 'none']``.
@@ -96,9 +102,7 @@ class TD3(AlgoBase):
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
     _tau: float
-    _bootstrap: bool
     _n_critics: int
-    _share_encoder: bool
     _target_reduction_type: str
     _target_smoothing_sigma: float
     _target_smoothing_clip: float
@@ -123,8 +127,6 @@ class TD3(AlgoBase):
         gamma: float = 0.99,
         tau: float = 0.005,
         n_critics: int = 2,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         target_reduction_type: str = "min",
         target_smoothing_sigma: float = 0.2,
         target_smoothing_clip: float = 0.5,
@@ -145,6 +147,7 @@ class TD3(AlgoBase):
             scaler=scaler,
             action_scaler=action_scaler,
             generator=generator,
+            kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
         self._critic_learning_rate = critic_learning_rate
@@ -154,9 +157,7 @@ class TD3(AlgoBase):
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
         self._tau = tau
-        self._bootstrap = bootstrap
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._target_reduction_type = target_reduction_type
         self._target_smoothing_sigma = target_smoothing_sigma
         self._target_smoothing_clip = target_smoothing_clip
@@ -165,7 +166,7 @@ class TD3(AlgoBase):
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = TD3Impl(
@@ -181,8 +182,6 @@ class TD3(AlgoBase):
             gamma=self._gamma,
             tau=self._tau,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             target_reduction_type=self._target_reduction_type,
             target_smoothing_sigma=self._target_smoothing_sigma,
             target_smoothing_clip=self._target_smoothing_clip,

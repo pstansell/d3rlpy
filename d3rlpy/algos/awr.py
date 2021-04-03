@@ -1,19 +1,25 @@
-from typing import Any, List, Optional, Union, Sequence
-from abc import abstractmethod
+from typing import Any, List, Optional, Sequence, Union
 
 import numpy as np
 
+from ..argument_utility import (
+    ActionScalerArg,
+    AugmentationArg,
+    EncoderArg,
+    ScalerArg,
+    UseGPUArg,
+    check_augmentation,
+    check_encoder,
+    check_use_gpu,
+)
+from ..augmentation import AugmentationPipeline
+from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..dataset import TransitionMiniBatch, compute_lambda_return
+from ..gpu import Device
+from ..models.encoders import EncoderFactory
+from ..models.optimizers import OptimizerFactory, SGDFactory
 from .base import AlgoBase, DataGenerator
 from .torch.awr_impl import AWRBaseImpl, AWRImpl, DiscreteAWRImpl
-from ..augmentation import AugmentationPipeline
-from ..dataset import compute_lambda_return, TransitionMiniBatch
-from ..models.optimizers import OptimizerFactory, SGDFactory
-from ..models.encoders import EncoderFactory
-from ..gpu import Device
-from ..argument_utility import check_encoder, check_use_gpu, check_augmentation
-from ..argument_utility import ScalerArg, ActionScalerArg, EncoderArg
-from ..argument_utility import UseGPUArg, AugmentationArg
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
 
 
 class _AWRBase(AlgoBase):
@@ -69,6 +75,7 @@ class _AWRBase(AlgoBase):
             scaler=scaler,
             action_scaler=action_scaler,
             generator=generator,
+            kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
         self._critic_learning_rate = critic_learning_rate
@@ -85,12 +92,6 @@ class _AWRBase(AlgoBase):
         self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
-
-    @abstractmethod
-    def create_impl(
-        self, observation_shape: Sequence[int], action_size: int
-    ) -> None:
-        pass
 
     def _compute_lambda_returns(self, batch: TransitionMiniBatch) -> np.ndarray:
         # compute TD(lambda)
@@ -249,7 +250,7 @@ class AWR(_AWRBase):
 
     _impl: Optional[AWRImpl]
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = AWRImpl(
@@ -334,7 +335,7 @@ class DiscreteAWR(_AWRBase):
 
     _impl: Optional[DiscreteAWRImpl]
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = DiscreteAWRImpl(

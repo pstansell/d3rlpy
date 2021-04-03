@@ -1,11 +1,14 @@
 import copy
-from typing import Any, Dict, Iterable, Union, Tuple, Type, cast
+from typing import Any, Dict, Iterable, Tuple, Type, Union, cast
 
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim import Optimizer, SGD, Adam, RMSprop
+from torch.optim import SGD, Adam, Optimizer, RMSprop
+
+from ..decorators import pretty_repr
 
 
+@pretty_repr
 class OptimizerFactory:
     """A factory class that creates an optimizer object in a lazy way.
 

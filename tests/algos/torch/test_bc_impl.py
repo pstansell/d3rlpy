@@ -2,12 +2,12 @@ import pytest
 
 from d3rlpy.algos.torch.bc_impl import BCImpl, DiscreteBCImpl
 from d3rlpy.augmentation import DrQPipeline
-from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.encoders import DefaultEncoderFactory
+from d3rlpy.models.optimizers import AdamFactory
 from tests.algos.algo_test import (
-    torch_impl_tester,
-    DummyScaler,
     DummyActionScaler,
+    DummyScaler,
+    torch_impl_tester,
 )
 
 
@@ -30,12 +30,12 @@ def test_bc_impl(
     augmentation,
 ):
     impl = BCImpl(
-        observation_shape,
-        action_size,
-        learning_rate,
-        optim_factory,
-        encoder_factory,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        learning_rate=learning_rate,
+        optim_factory=optim_factory,
+        encoder_factory=encoder_factory,
+        use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
         augmentation=augmentation,
@@ -62,13 +62,13 @@ def test_discrete_bc_impl(
     augmentation,
 ):
     impl = DiscreteBCImpl(
-        observation_shape,
-        action_size,
-        learning_rate,
-        optim_factory,
-        encoder_factory,
-        beta,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        learning_rate=learning_rate,
+        optim_factory=optim_factory,
+        encoder_factory=encoder_factory,
+        beta=beta,
+        use_gpu=None,
         scaler=scaler,
         augmentation=augmentation,
     )

@@ -5,7 +5,7 @@ from typing import Tuple, Union, cast
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal, Categorical
+from torch.distributions import Categorical, Normal
 
 from .encoders import Encoder, EncoderWithAction
 
@@ -123,7 +123,7 @@ class DeterministicResidualPolicy(Policy):
         )
 
 
-class NormalPolicy(Policy):
+class SquashedNormalPolicy(Policy):
 
     _encoder: Encoder
     _action_size: int
@@ -224,7 +224,7 @@ class NormalPolicy(Policy):
         # sample noise from Gaussian distribution
         noise = torch.randn(x.shape[0], n, self._action_size)
 
-        return expanded_mean + noise * expanded_std
+        return torch.tanh(expanded_mean + noise * expanded_std)
 
     def best_action(self, x: torch.Tensor) -> torch.Tensor:
         action = self.forward(x, deterministic=True, with_log_prob=False)

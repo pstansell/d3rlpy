@@ -1,44 +1,39 @@
-import math
 import copy
+import math
 from typing import Optional, Sequence, Tuple
 
-import torch
 import numpy as np
+import torch
 from torch.optim import Optimizer
 
-from ...models.torch import (
-    NormalPolicy,
-    CategoricalPolicy,
-    EnsembleDiscreteQFunction,
-    Parameter,
-)
+from ...augmentation import AugmentationPipeline
+from ...gpu import Device
 from ...models.builders import (
-    create_normal_policy,
     create_categorical_policy,
     create_discrete_q_function,
     create_parameter,
+    create_squashed_normal_policy,
 )
-from ...models.optimizers import OptimizerFactory
 from ...models.encoders import EncoderFactory
+from ...models.optimizers import OptimizerFactory
 from ...models.q_functions import QFunctionFactory
-from ...gpu import Device
-from ...preprocessing import Scaler, ActionScaler
-from ...augmentation import AugmentationPipeline
-from ...torch_utility import (
-    torch_api,
-    train_api,
-    hard_sync,
-    augmentation_api,
+from ...models.torch import (
+    CategoricalPolicy,
+    EnsembleDiscreteQFunction,
+    Parameter,
+    SquashedNormalPolicy,
 )
-from .utility import DiscreteQFunctionMixin
-from .ddpg_impl import DDPGBaseImpl
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import augmentation_api, hard_sync, torch_api, train_api
 from .base import TorchImplBase
+from .ddpg_impl import DDPGBaseImpl
+from .utility import DiscreteQFunctionMixin
 
 
 class SACImpl(DDPGBaseImpl):
 
-    _policy: Optional[NormalPolicy]
-    _targ_policy: Optional[NormalPolicy]
+    _policy: Optional[SquashedNormalPolicy]
+    _targ_policy: Optional[SquashedNormalPolicy]
     _temp_learning_rate: float
     _temp_optim_factory: OptimizerFactory
     _initial_temperature: float
@@ -61,8 +56,6 @@ class SACImpl(DDPGBaseImpl):
         gamma: float,
         tau: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         initial_temperature: float,
         use_gpu: Optional[Device],
@@ -83,8 +76,6 @@ class SACImpl(DDPGBaseImpl):
             gamma=gamma,
             tau=tau,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type=target_reduction_type,
             use_gpu=use_gpu,
             scaler=scaler,
@@ -105,7 +96,7 @@ class SACImpl(DDPGBaseImpl):
         self._build_temperature_optim()
 
     def _build_actor(self) -> None:
-        self._policy = create_normal_policy(
+        self._policy = create_squashed_normal_policy(
             self._observation_shape,
             self._action_size,
             self._actor_encoder_factory,
@@ -183,8 +174,6 @@ class DiscreteSACImpl(DiscreteQFunctionMixin, TorchImplBase):
     _q_func_factory: QFunctionFactory
     _gamma: float
     _n_critics: int
-    _bootstrap: bool
-    _share_encoder: bool
     _initial_temperature: float
     _use_gpu: Optional[Device]
     _policy: Optional[CategoricalPolicy]
@@ -210,8 +199,6 @@ class DiscreteSACImpl(DiscreteQFunctionMixin, TorchImplBase):
         q_func_factory: QFunctionFactory,
         gamma: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         initial_temperature: float,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
@@ -231,8 +218,6 @@ class DiscreteSACImpl(DiscreteQFunctionMixin, TorchImplBase):
         self._q_func_factory = q_func_factory
         self._gamma = gamma
         self._n_critics = n_critics
-        self._bootstrap = bootstrap
-        self._share_encoder = share_encoder
         self._initial_temperature = initial_temperature
         self._use_gpu = use_gpu
 
@@ -270,8 +255,6 @@ class DiscreteSACImpl(DiscreteQFunctionMixin, TorchImplBase):
             self._critic_encoder_factory,
             self._q_func_factory,
             n_ensembles=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
         )
 
     def _build_critic_optim(self) -> None:

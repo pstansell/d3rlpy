@@ -1,35 +1,43 @@
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
+from d3rlpy.models.builders import (
+    create_categorical_policy,
+    create_conditional_vae,
+    create_continuous_q_function,
+    create_deterministic_policy,
+    create_deterministic_regressor,
+    create_deterministic_residual_policy,
+    create_discrete_imitator,
+    create_discrete_q_function,
+    create_parameter,
+    create_probablistic_dynamics,
+    create_probablistic_regressor,
+    create_squashed_normal_policy,
+    create_value_function,
+)
 from d3rlpy.models.encoders import DefaultEncoderFactory
 from d3rlpy.models.q_functions import MeanQFunctionFactory
-from d3rlpy.models.builders import create_deterministic_policy
-from d3rlpy.models.builders import create_deterministic_residual_policy
-from d3rlpy.models.builders import create_normal_policy
-from d3rlpy.models.builders import create_categorical_policy
-from d3rlpy.models.builders import create_discrete_q_function
-from d3rlpy.models.builders import create_continuous_q_function
-from d3rlpy.models.builders import create_conditional_vae
-from d3rlpy.models.builders import create_discrete_imitator
-from d3rlpy.models.builders import create_deterministic_regressor
-from d3rlpy.models.builders import create_probablistic_regressor
-from d3rlpy.models.builders import create_value_function
-from d3rlpy.models.builders import create_probablistic_dynamics
-from d3rlpy.models.builders import create_parameter
-from d3rlpy.models.torch.policies import DeterministicPolicy
-from d3rlpy.models.torch.policies import DeterministicResidualPolicy
-from d3rlpy.models.torch.policies import NormalPolicy
-from d3rlpy.models.torch.policies import CategoricalPolicy
-from d3rlpy.models.torch.q_functions import EnsembleDiscreteQFunction
-from d3rlpy.models.torch.q_functions import EnsembleContinuousQFunction
-from d3rlpy.models.torch.imitators import ConditionalVAE
-from d3rlpy.models.torch.imitators import DiscreteImitator
-from d3rlpy.models.torch.imitators import DeterministicRegressor
-from d3rlpy.models.torch.imitators import ProbablisticRegressor
-from d3rlpy.models.torch.v_functions import ValueFunction
 from d3rlpy.models.torch.dynamics import EnsembleDynamics
+from d3rlpy.models.torch.imitators import (
+    ConditionalVAE,
+    DeterministicRegressor,
+    DiscreteImitator,
+    ProbablisticRegressor,
+)
 from d3rlpy.models.torch.parameters import Parameter
+from d3rlpy.models.torch.policies import (
+    CategoricalPolicy,
+    DeterministicPolicy,
+    DeterministicResidualPolicy,
+    SquashedNormalPolicy,
+)
+from d3rlpy.models.torch.q_functions import (
+    EnsembleContinuousQFunction,
+    EnsembleDiscreteQFunction,
+)
+from d3rlpy.models.torch.v_functions import ValueFunction
 
 
 @pytest.mark.parametrize("observation_shape", [(4, 84, 84), (100,)])
@@ -74,14 +82,14 @@ def test_create_deterministic_residual_policy(
 @pytest.mark.parametrize("action_size", [2])
 @pytest.mark.parametrize("batch_size", [32])
 @pytest.mark.parametrize("encoder_factory", [DefaultEncoderFactory()])
-def test_create_normal_policy(
+def test_create_squashed_normal_policy(
     observation_shape, action_size, batch_size, encoder_factory
 ):
-    policy = create_normal_policy(
+    policy = create_squashed_normal_policy(
         observation_shape, action_size, encoder_factory
     )
 
-    assert isinstance(policy, NormalPolicy)
+    assert isinstance(policy, SquashedNormalPolicy)
 
     x = torch.rand((batch_size,) + observation_shape)
     y = policy(x)
@@ -111,27 +119,34 @@ def test_create_categorical_policy(
 @pytest.mark.parametrize("batch_size", [32])
 @pytest.mark.parametrize("n_ensembles", [1, 5])
 @pytest.mark.parametrize("encoder_factory", [DefaultEncoderFactory()])
-@pytest.mark.parametrize("q_func_factory", [MeanQFunctionFactory()])
 @pytest.mark.parametrize("share_encoder", [False, True])
+@pytest.mark.parametrize("bootstrap", [False, True])
 def test_create_discrete_q_function(
     observation_shape,
     action_size,
     batch_size,
     n_ensembles,
     encoder_factory,
-    q_func_factory,
     share_encoder,
+    bootstrap,
 ):
+    q_func_factory = MeanQFunctionFactory(
+        share_encoder=share_encoder, bootstrap=bootstrap
+    )
+
     q_func = create_discrete_q_function(
         observation_shape,
         action_size,
         encoder_factory,
         q_func_factory,
         n_ensembles,
-        share_encoder=share_encoder,
     )
 
     assert isinstance(q_func, EnsembleDiscreteQFunction)
+    if n_ensembles == 1:
+        assert q_func.bootstrap == False
+    else:
+        assert q_func.bootstrap == bootstrap
 
     # check share_encoder
     encoder = q_func.q_funcs[0].encoder
@@ -151,27 +166,34 @@ def test_create_discrete_q_function(
 @pytest.mark.parametrize("batch_size", [32])
 @pytest.mark.parametrize("n_ensembles", [1, 2])
 @pytest.mark.parametrize("encoder_factory", [DefaultEncoderFactory()])
-@pytest.mark.parametrize("q_func_factory", [MeanQFunctionFactory()])
 @pytest.mark.parametrize("share_encoder", [False, True])
+@pytest.mark.parametrize("bootstrap", [False, True])
 def test_create_continuous_q_function(
     observation_shape,
     action_size,
     batch_size,
     n_ensembles,
     encoder_factory,
-    q_func_factory,
     share_encoder,
+    bootstrap,
 ):
+    q_func_factory = MeanQFunctionFactory(
+        share_encoder=share_encoder, bootstrap=bootstrap
+    )
+
     q_func = create_continuous_q_function(
         observation_shape,
         action_size,
         encoder_factory,
         q_func_factory,
         n_ensembles,
-        share_encoder=share_encoder,
     )
 
     assert isinstance(q_func, EnsembleContinuousQFunction)
+    if n_ensembles == 1:
+        assert q_func.bootstrap == False
+    else:
+        assert q_func.bootstrap == bootstrap
 
     # check share_encoder
     encoder = q_func.q_funcs[0].encoder

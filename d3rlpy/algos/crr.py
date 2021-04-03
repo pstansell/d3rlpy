@@ -1,18 +1,26 @@
 from typing import Any, List, Optional, Sequence
+
+from ..argument_utility import (
+    ActionScalerArg,
+    AugmentationArg,
+    EncoderArg,
+    QFuncArg,
+    ScalerArg,
+    UseGPUArg,
+    check_augmentation,
+    check_encoder,
+    check_q_func,
+    check_use_gpu,
+)
+from ..augmentation import AugmentationPipeline
+from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..dataset import TransitionMiniBatch
+from ..gpu import Device
+from ..models.encoders import EncoderFactory
+from ..models.optimizers import AdamFactory, OptimizerFactory
+from ..models.q_functions import QFunctionFactory
 from .base import AlgoBase, DataGenerator
 from .torch.crr_impl import CRRImpl
-from ..augmentation import AugmentationPipeline
-from ..dataset import TransitionMiniBatch
-from ..models.encoders import EncoderFactory
-from ..models.q_functions import QFunctionFactory
-from ..models.optimizers import OptimizerFactory, AdamFactory
-from ..gpu import Device
-from ..argument_utility import check_encoder, EncoderArg
-from ..argument_utility import check_use_gpu, UseGPUArg
-from ..argument_utility import check_augmentation, AugmentationArg
-from ..argument_utility import check_q_func, QFuncArg
-from ..argument_utility import ScalerArg, ActionScalerArg
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
 
 
 class CRR(AlgoBase):
@@ -89,8 +97,6 @@ class CRR(AlgoBase):
             are ``['binary', 'exp']``.
         max_weight (float): maximum weight for cross-entropy loss.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         target_reduction_type (str): ensemble reduction method at target value
             estimation. The available options are
             ``['min', 'max', 'mean', 'mix', 'none']``.
@@ -116,14 +122,12 @@ class CRR(AlgoBase):
     _actor_encoder_factory: EncoderFactory
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _bootstrap: bool
     _beta: float
     _n_action_samples: int
     _advantage_type: str
     _weight_type: str
     _max_weight: float
     _n_critics: int
-    _share_encoder: bool
     _target_update_interval: int
     _target_reduction_type: str
     _update_actor_interval: int
@@ -151,8 +155,6 @@ class CRR(AlgoBase):
         weight_type: str = "exp",
         max_weight: float = 20.0,
         n_critics: int = 1,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         target_update_interval: int = 100,
         target_reduction_type: str = "min",
         update_actor_interval: int = 1,
@@ -172,6 +174,7 @@ class CRR(AlgoBase):
             scaler=scaler,
             action_scaler=action_scaler,
             generator=generator,
+            kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
         self._critic_learning_rate = critic_learning_rate
@@ -180,14 +183,12 @@ class CRR(AlgoBase):
         self._actor_encoder_factory = check_encoder(actor_encoder_factory)
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._bootstrap = bootstrap
         self._beta = beta
         self._n_action_samples = n_action_samples
         self._advantage_type = advantage_type
         self._weight_type = weight_type
         self._max_weight = max_weight
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._target_update_interval = target_update_interval
         self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
@@ -195,7 +196,7 @@ class CRR(AlgoBase):
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = CRRImpl(
@@ -215,8 +216,6 @@ class CRR(AlgoBase):
             weight_type=self._weight_type,
             max_weight=self._max_weight,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,

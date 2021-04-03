@@ -6,27 +6,27 @@ import numpy as np
 import torch
 from torch.optim import Optimizer
 
-from ...augmentation import DrQPipeline
-from ...models.torch import (
-    EnsembleQFunction,
-    EnsembleDiscreteQFunction,
-    EnsembleContinuousQFunction,
-)
-from ...models.builders import (
-    create_continuous_q_function,
-    create_discrete_q_function,
-)
-from ...models.optimizers import OptimizerFactory
-from ...models.encoders import EncoderFactory
-from ...models.q_functions import QFunctionFactory
-from ...preprocessing import Scaler, ActionScaler
-from ...gpu import Device
-from ...torch_utility import torch_api, train_api, hard_sync
+from ...algos.torch.base import TorchImplBase
 from ...algos.torch.utility import (
     ContinuousQFunctionMixin,
     DiscreteQFunctionMixin,
 )
-from ...algos.torch.base import TorchImplBase
+from ...augmentation import DrQPipeline
+from ...gpu import Device
+from ...models.builders import (
+    create_continuous_q_function,
+    create_discrete_q_function,
+)
+from ...models.encoders import EncoderFactory
+from ...models.optimizers import OptimizerFactory
+from ...models.q_functions import QFunctionFactory
+from ...models.torch import (
+    EnsembleContinuousQFunction,
+    EnsembleDiscreteQFunction,
+    EnsembleQFunction,
+)
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import hard_sync, torch_api, train_api
 
 
 class FQEBaseImpl(TorchImplBase):
@@ -37,8 +37,6 @@ class FQEBaseImpl(TorchImplBase):
     _q_func_factory: QFunctionFactory
     _gamma: float
     _n_critics: int
-    _bootstrap: bool
-    _share_encoder: bool
     _use_gpu: Optional[Device]
     _q_func: Optional[EnsembleQFunction]
     _targ_q_func: Optional[EnsembleQFunction]
@@ -54,8 +52,6 @@ class FQEBaseImpl(TorchImplBase):
         q_func_factory: QFunctionFactory,
         gamma: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
         action_scaler: Optional[ActionScaler],
@@ -69,8 +65,6 @@ class FQEBaseImpl(TorchImplBase):
         self._q_func_factory = q_func_factory
         self._gamma = gamma
         self._n_critics = n_critics
-        self._bootstrap = bootstrap
-        self._share_encoder = share_encoder
         self._use_gpu = use_gpu
 
         # initialized in build
@@ -168,8 +162,6 @@ class FQEImpl(ContinuousQFunctionMixin, FQEBaseImpl):
             self._encoder_factory,
             self._q_func_factory,
             n_ensembles=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
         )
 
 
@@ -185,8 +177,6 @@ class DiscreteFQEImpl(DiscreteQFunctionMixin, FQEBaseImpl):
             self._encoder_factory,
             self._q_func_factory,
             n_ensembles=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
         )
 
     def _compute_loss(

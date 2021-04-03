@@ -5,23 +5,23 @@ import numpy as np
 import torch
 from torch.optim import Optimizer
 
-from ...models.torch import (
-    DeterministicResidualPolicy,
-    DeterministicPolicy,
-    ConditionalVAE,
-)
+from ...augmentation import AugmentationPipeline
+from ...gpu import Device
 from ...models.builders import (
+    create_conditional_vae,
     create_deterministic_policy,
     create_deterministic_residual_policy,
-    create_conditional_vae,
 )
-from ...models.optimizers import OptimizerFactory
 from ...models.encoders import EncoderFactory
+from ...models.optimizers import OptimizerFactory
 from ...models.q_functions import QFunctionFactory
-from ...gpu import Device
-from ...preprocessing import Scaler, ActionScaler
-from ...augmentation import AugmentationPipeline
-from ...torch_utility import torch_api, train_api, soft_sync
+from ...models.torch import (
+    ConditionalVAE,
+    DeterministicPolicy,
+    DeterministicResidualPolicy,
+)
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import soft_sync, torch_api, train_api
 from .ddpg_impl import DDPGBaseImpl
 
 
@@ -55,8 +55,6 @@ class PLASImpl(DDPGBaseImpl):
         gamma: float,
         tau: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         lam: float,
         beta: float,
@@ -78,8 +76,6 @@ class PLASImpl(DDPGBaseImpl):
             gamma=gamma,
             tau=tau,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type=target_reduction_type,
             use_gpu=use_gpu,
             scaler=scaler,
@@ -195,8 +191,6 @@ class PLASWithPerturbationImpl(PLASImpl):
         gamma: float,
         tau: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         lam: float,
         beta: float,
@@ -222,8 +216,6 @@ class PLASWithPerturbationImpl(PLASImpl):
             gamma=gamma,
             tau=tau,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type=target_reduction_type,
             lam=lam,
             beta=beta,

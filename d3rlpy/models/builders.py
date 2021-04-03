@@ -3,16 +3,24 @@ from typing import Sequence, cast
 import torch
 import torch.nn as nn
 
-from .torch import EnsembleDiscreteQFunction, EnsembleContinuousQFunction
-from .torch import DeterministicPolicy, DeterministicResidualPolicy
-from .torch import NormalPolicy, CategoricalPolicy
-from .torch import ConditionalVAE, DiscreteImitator
-from .torch import DeterministicRegressor, ProbablisticRegressor
-from .torch import ValueFunction
-from .torch import EnsembleDynamics, ProbablisticDynamics
-from .torch import Parameter
 from .encoders import EncoderFactory
 from .q_functions import QFunctionFactory
+from .torch import (
+    CategoricalPolicy,
+    ConditionalVAE,
+    DeterministicPolicy,
+    DeterministicRegressor,
+    DeterministicResidualPolicy,
+    DiscreteImitator,
+    EnsembleContinuousQFunction,
+    EnsembleDiscreteQFunction,
+    EnsembleDynamics,
+    Parameter,
+    ProbablisticDynamics,
+    ProbablisticRegressor,
+    SquashedNormalPolicy,
+    ValueFunction,
+)
 
 
 def create_discrete_q_function(
@@ -21,10 +29,8 @@ def create_discrete_q_function(
     encoder_factory: EncoderFactory,
     q_func_factory: QFunctionFactory,
     n_ensembles: int = 1,
-    bootstrap: bool = False,
-    share_encoder: bool = False,
 ) -> EnsembleDiscreteQFunction:
-    if share_encoder:
+    if q_func_factory.share_encoder:
         encoder = encoder_factory.create(observation_shape)
         # normalize gradient scale by ensemble size
         for p in cast(nn.Module, encoder).parameters():
@@ -32,10 +38,12 @@ def create_discrete_q_function(
 
     q_funcs = []
     for _ in range(n_ensembles):
-        if not share_encoder:
+        if not q_func_factory.share_encoder:
             encoder = encoder_factory.create(observation_shape)
         q_funcs.append(q_func_factory.create_discrete(encoder, action_size))
-    return EnsembleDiscreteQFunction(q_funcs, bootstrap)
+    return EnsembleDiscreteQFunction(
+        q_funcs, bootstrap=q_func_factory.bootstrap
+    )
 
 
 def create_continuous_q_function(
@@ -44,10 +52,8 @@ def create_continuous_q_function(
     encoder_factory: EncoderFactory,
     q_func_factory: QFunctionFactory,
     n_ensembles: int = 1,
-    bootstrap: bool = False,
-    share_encoder: bool = False,
 ) -> EnsembleContinuousQFunction:
-    if share_encoder:
+    if q_func_factory.share_encoder:
         encoder = encoder_factory.create_with_action(
             observation_shape, action_size
         )
@@ -57,12 +63,14 @@ def create_continuous_q_function(
 
     q_funcs = []
     for _ in range(n_ensembles):
-        if not share_encoder:
+        if not q_func_factory.share_encoder:
             encoder = encoder_factory.create_with_action(
                 observation_shape, action_size
             )
         q_funcs.append(q_func_factory.create_continuous(encoder))
-    return EnsembleContinuousQFunction(q_funcs, bootstrap)
+    return EnsembleContinuousQFunction(
+        q_funcs, bootstrap=q_func_factory.bootstrap
+    )
 
 
 def create_deterministic_policy(
@@ -84,16 +92,16 @@ def create_deterministic_residual_policy(
     return DeterministicResidualPolicy(encoder, scale)
 
 
-def create_normal_policy(
+def create_squashed_normal_policy(
     observation_shape: Sequence[int],
     action_size: int,
     encoder_factory: EncoderFactory,
     min_logstd: float = -20.0,
     max_logstd: float = 2.0,
     use_std_parameter: bool = False,
-) -> NormalPolicy:
+) -> SquashedNormalPolicy:
     encoder = encoder_factory.create(observation_shape)
-    return NormalPolicy(
+    return SquashedNormalPolicy(
         encoder,
         action_size,
         min_logstd=min_logstd,

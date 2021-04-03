@@ -1,14 +1,27 @@
 import copy
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Union, Type
-from typing import Sequence
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Type,
+    Union,
+)
 
 import torch
 
-from .torch import Encoder, EncoderWithAction
-from .torch import PixelEncoder
-from .torch import PixelEncoderWithAction
-from .torch import VectorEncoder
-from .torch import VectorEncoderWithAction
+from ..decorators import pretty_repr
+from .torch import (
+    Encoder,
+    EncoderWithAction,
+    PixelEncoder,
+    PixelEncoderWithAction,
+    VectorEncoder,
+    VectorEncoderWithAction,
+)
 
 
 def _create_activation(
@@ -23,6 +36,7 @@ def _create_activation(
     raise ValueError("invalid activation_type.")
 
 
+@pretty_repr
 class EncoderFactory:
     TYPE: ClassVar[str] = "none"
 
@@ -92,6 +106,7 @@ class PixelEncoderFactory(EncoderFactory):
         feature_size (int): the last linear layer size.
         activation (str): activation function name.
         use_batch_norm (bool): flag to insert batch normalization layers.
+        dropout_rate (float): dropout probability.
 
     """
 
@@ -100,6 +115,7 @@ class PixelEncoderFactory(EncoderFactory):
     _feature_size: int
     _activation: str
     _use_batch_norm: bool
+    _dropout_rate: Optional[float]
 
     def __init__(
         self,
@@ -107,6 +123,7 @@ class PixelEncoderFactory(EncoderFactory):
         feature_size: int = 512,
         activation: str = "relu",
         use_batch_norm: bool = False,
+        dropout_rate: Optional[float] = None,
     ):
         if filters is None:
             self._filters = [(32, 8, 4), (64, 4, 2), (64, 3, 1)]
@@ -115,6 +132,7 @@ class PixelEncoderFactory(EncoderFactory):
         self._feature_size = feature_size
         self._activation = activation
         self._use_batch_norm = use_batch_norm
+        self._dropout_rate = dropout_rate
 
     def create(self, observation_shape: Sequence[int]) -> PixelEncoder:
         assert len(observation_shape) == 3
@@ -123,6 +141,7 @@ class PixelEncoderFactory(EncoderFactory):
             filters=self._filters,
             feature_size=self._feature_size,
             use_batch_norm=self._use_batch_norm,
+            dropout_rate=self._dropout_rate,
             activation=_create_activation(self._activation),
         )
 
@@ -139,6 +158,7 @@ class PixelEncoderFactory(EncoderFactory):
             filters=self._filters,
             feature_size=self._feature_size,
             use_batch_norm=self._use_batch_norm,
+            dropout_rate=self._dropout_rate,
             discrete_action=discrete_action,
             activation=_create_activation(self._activation),
         )
@@ -153,6 +173,7 @@ class PixelEncoderFactory(EncoderFactory):
             "feature_size": self._feature_size,
             "activation": self._activation,
             "use_batch_norm": self._use_batch_norm,
+            "dropout_rate": self._dropout_rate,
         }
         return params
 
@@ -168,6 +189,7 @@ class VectorEncoderFactory(EncoderFactory):
         activation (str): activation function name.
         use_batch_norm (bool): flag to insert batch normalization layers.
         use_dense (bool): flag to use DenseNet architecture.
+        dropout_rate (float): dropout probability.
 
     """
 
@@ -175,6 +197,7 @@ class VectorEncoderFactory(EncoderFactory):
     _hidden_units: Sequence[int]
     _activation: str
     _use_batch_norm: bool
+    _dropout_rate: Optional[float]
     _use_dense: bool
 
     def __init__(
@@ -182,6 +205,7 @@ class VectorEncoderFactory(EncoderFactory):
         hidden_units: Optional[Sequence[int]] = None,
         activation: str = "relu",
         use_batch_norm: bool = False,
+        dropout_rate: Optional[float] = None,
         use_dense: bool = False,
     ):
         if hidden_units is None:
@@ -190,6 +214,7 @@ class VectorEncoderFactory(EncoderFactory):
             self._hidden_units = hidden_units
         self._activation = activation
         self._use_batch_norm = use_batch_norm
+        self._dropout_rate = dropout_rate
         self._use_dense = use_dense
 
     def create(self, observation_shape: Sequence[int]) -> VectorEncoder:
@@ -198,6 +223,7 @@ class VectorEncoderFactory(EncoderFactory):
             observation_shape=observation_shape,
             hidden_units=self._hidden_units,
             use_batch_norm=self._use_batch_norm,
+            dropout_rate=self._dropout_rate,
             use_dense=self._use_dense,
             activation=_create_activation(self._activation),
         )
@@ -214,6 +240,7 @@ class VectorEncoderFactory(EncoderFactory):
             action_size=action_size,
             hidden_units=self._hidden_units,
             use_batch_norm=self._use_batch_norm,
+            dropout_rate=self._dropout_rate,
             use_dense=self._use_dense,
             discrete_action=discrete_action,
             activation=_create_activation(self._activation),
@@ -228,6 +255,7 @@ class VectorEncoderFactory(EncoderFactory):
             "hidden_units": hidden_units,
             "activation": self._activation,
             "use_batch_norm": self._use_batch_norm,
+            "dropout_rate": self._dropout_rate,
             "use_dense": self._use_dense,
         }
         return params
@@ -241,26 +269,38 @@ class DefaultEncoderFactory(EncoderFactory):
     Args:
         activation (str): activation function name.
         use_batch_norm (bool): flag to insert batch normalization layers.
+        dropout_rate (float): dropout probability.
 
     """
 
     TYPE: ClassVar[str] = "default"
     _activation: str
     _use_batch_norm: bool
+    _dropout_rate: Optional[float]
 
-    def __init__(self, activation: str = "relu", use_batch_norm: bool = False):
+    def __init__(
+        self,
+        activation: str = "relu",
+        use_batch_norm: bool = False,
+        dropout_rate: Optional[float] = None,
+    ):
         self._activation = activation
         self._use_batch_norm = use_batch_norm
+        self._dropout_rate = dropout_rate
 
     def create(self, observation_shape: Sequence[int]) -> Encoder:
         factory: Union[PixelEncoderFactory, VectorEncoderFactory]
         if len(observation_shape) == 3:
             factory = PixelEncoderFactory(
-                activation=self._activation, use_batch_norm=self._use_batch_norm
+                activation=self._activation,
+                use_batch_norm=self._use_batch_norm,
+                dropout_rate=self._dropout_rate,
             )
         else:
             factory = VectorEncoderFactory(
-                activation=self._activation, use_batch_norm=self._use_batch_norm
+                activation=self._activation,
+                use_batch_norm=self._use_batch_norm,
+                dropout_rate=self._dropout_rate,
             )
         return factory.create(observation_shape)
 
@@ -273,11 +313,15 @@ class DefaultEncoderFactory(EncoderFactory):
         factory: Union[PixelEncoderFactory, VectorEncoderFactory]
         if len(observation_shape) == 3:
             factory = PixelEncoderFactory(
-                activation=self._activation, use_batch_norm=self._use_batch_norm
+                activation=self._activation,
+                use_batch_norm=self._use_batch_norm,
+                dropout_rate=self._dropout_rate,
             )
         else:
             factory = VectorEncoderFactory(
-                activation=self._activation, use_batch_norm=self._use_batch_norm
+                activation=self._activation,
+                use_batch_norm=self._use_batch_norm,
+                dropout_rate=self._dropout_rate,
             )
         return factory.create_with_action(
             observation_shape, action_size, discrete_action
@@ -287,6 +331,7 @@ class DefaultEncoderFactory(EncoderFactory):
         return {
             "activation": self._activation,
             "use_batch_norm": self._use_batch_norm,
+            "dropout_rate": self._dropout_rate,
         }
 
 
@@ -312,16 +357,24 @@ class DenseEncoderFactory(EncoderFactory):
     Args:
         activation (str): activation function name.
         use_batch_norm (bool): flag to insert batch normalization layers.
+        dropout_rate (float): dropout probability.
 
     """
 
     TYPE: ClassVar[str] = "dense"
     _activation: str
     _use_batch_norm: bool
+    _dropout_rate: Optional[float]
 
-    def __init__(self, activation: str = "relu", use_batch_norm: bool = False):
+    def __init__(
+        self,
+        activation: str = "relu",
+        use_batch_norm: bool = False,
+        dropout_rate: Optional[float] = None,
+    ):
         self._activation = activation
         self._use_batch_norm = use_batch_norm
+        self._dropout_rate = dropout_rate
 
     def create(self, observation_shape: Sequence[int]) -> VectorEncoder:
         if len(observation_shape) == 3:
@@ -331,6 +384,7 @@ class DenseEncoderFactory(EncoderFactory):
             activation=self._activation,
             use_dense=True,
             use_batch_norm=self._use_batch_norm,
+            dropout_rate=self._dropout_rate,
         )
         return factory.create(observation_shape)
 
@@ -347,6 +401,7 @@ class DenseEncoderFactory(EncoderFactory):
             activation=self._activation,
             use_dense=True,
             use_batch_norm=self._use_batch_norm,
+            dropout_rate=self._dropout_rate,
         )
         return factory.create_with_action(
             observation_shape, action_size, discrete_action
@@ -356,6 +411,7 @@ class DenseEncoderFactory(EncoderFactory):
         return {
             "activation": self._activation,
             "use_batch_norm": self._use_batch_norm,
+            "dropout_rate": self._dropout_rate,
         }
 
 

@@ -1,19 +1,20 @@
 # pylint: disable=unused-import
 
-import urllib.request as request
 import os
 import pickle
+import re
+import urllib.request as request
 from typing import Tuple
 
-import numpy as np
 import gym
+import numpy as np
 
 from .dataset import MDPDataset
 from .envs import ChannelFirst
 
 DATA_DIRECTORY = "d3rlpy_data"
-CARTPOLE_URL = "https://www.dropbox.com/s/2tmo7ul00268l3e/cartpole.pkl?dl=1"
-PENDULUM_URL = "https://www.dropbox.com/s/90z7a84ngndrqt4/pendulum.pkl?dl=1"
+CARTPOLE_URL = "https://www.dropbox.com/s/l1sdnq3zvoot2um/cartpole.h5?dl=1"
+PENDULUM_URL = "https://www.dropbox.com/s/vsiz9pwvshj7sly/pendulum.h5?dl=1"
 
 
 def get_cartpole(
@@ -21,8 +22,8 @@ def get_cartpole(
 ) -> Tuple[MDPDataset, gym.Env]:
     """Returns cartpole dataset and environment.
 
-    The dataset is automatically downloaded to `d3rlpy_data/cartpole.pkl` if it
-    does not exist.
+    The dataset is automatically downloaded to ``d3rlpy_data/cartpole.h5`` if
+    it does not exist.
 
     Args:
         create_mask: flag to create binary mask for bootstrapping.
@@ -32,7 +33,7 @@ def get_cartpole(
         tuple of :class:`d3rlpy.dataset.MDPDataset` and gym environment.
 
     """
-    data_path = os.path.join(DATA_DIRECTORY, "cartpole.pkl")
+    data_path = os.path.join(DATA_DIRECTORY, "cartpole.h5")
 
     # download dataset
     if not os.path.exists(data_path):
@@ -41,21 +42,12 @@ def get_cartpole(
         request.urlretrieve(CARTPOLE_URL, data_path)
 
     # load dataset
-    with open(data_path, "rb") as f:
-        observations, actions, rewards, terminals = pickle.load(f)
+    dataset = MDPDataset.load(
+        data_path, create_mask=create_mask, mask_size=mask_size
+    )
 
     # environment
     env = gym.make("CartPole-v0")
-
-    dataset = MDPDataset(
-        observations=np.array(observations, dtype=np.float32),
-        actions=actions,
-        rewards=rewards,
-        terminals=terminals,
-        discrete_action=True,
-        create_mask=create_mask,
-        mask_size=mask_size,
-    )
 
     return dataset, env
 
@@ -65,8 +57,8 @@ def get_pendulum(
 ) -> Tuple[MDPDataset, gym.Env]:
     """Returns pendulum dataset and environment.
 
-    The dataset is automatically downloaded to `d3rlpy_data/pendulum.pkl` if it
-    does not exist.
+    The dataset is automatically downloaded to ``d3rlpy_data/pendulum.h5`` if
+    it does not exist.
 
     Args:
         create_mask: flag to create binary mask for bootstrapping.
@@ -76,7 +68,7 @@ def get_pendulum(
         tuple of :class:`d3rlpy.dataset.MDPDataset` and gym environment.
 
     """
-    data_path = os.path.join(DATA_DIRECTORY, "pendulum.pkl")
+    data_path = os.path.join(DATA_DIRECTORY, "pendulum.h5")
 
     if not os.path.exists(data_path):
         os.makedirs(DATA_DIRECTORY, exist_ok=True)
@@ -84,20 +76,12 @@ def get_pendulum(
         request.urlretrieve(PENDULUM_URL, data_path)
 
     # load dataset
-    with open(data_path, "rb") as f:
-        observations, actions, rewards, terminals = pickle.load(f)
+    dataset = MDPDataset.load(
+        data_path, create_mask=create_mask, mask_size=mask_size
+    )
 
     # environment
     env = gym.make("Pendulum-v0")
-
-    dataset = MDPDataset(
-        observations=np.array(observations, dtype=np.float32),
-        actions=actions,
-        rewards=rewards,
-        terminals=terminals,
-        create_mask=create_mask,
-        mask_size=mask_size,
-    )
 
     return dataset, env
 
@@ -177,7 +161,7 @@ def get_atari(
             discrete_action=True,
             create_mask=create_mask,
             mask_size=mask_size,
-            **env.get_dataset()
+            **env.get_dataset(),
         )
         return dataset, env
     except ImportError as e:
@@ -246,3 +230,125 @@ def get_d4rl(
             "d4rl is not installed.\n"
             "pip install git+https://github.com/rail-berkeley/d4rl"
         ) from e
+
+
+ATARI_GAMES = [
+    "adventure",
+    "air-raid",
+    "alien",
+    "amidar",
+    "assault",
+    "asterix",
+    "asteroids",
+    "atlantis",
+    "bank-heist",
+    "battle-zone",
+    "beam-rider",
+    "berzerk",
+    "bowling",
+    "boxing",
+    "breakout",
+    "carnival",
+    "centipede",
+    "chopper-command",
+    "crazy-climber",
+    "defender",
+    "demon-attack",
+    "double-dunk",
+    "elevator-action",
+    "enduro",
+    "fishing-derby",
+    "freeway",
+    "frostbite",
+    "gopher",
+    "gravitar",
+    "hero",
+    "ice-hockey",
+    "jamesbond",
+    "journey-escape",
+    "kangaroo",
+    "krull",
+    "kung-fu-master",
+    "montezuma-revenge",
+    "ms-pacman",
+    "name-this-game",
+    "phoenix",
+    "pitfall",
+    "pong",
+    "pooyan",
+    "private-eye",
+    "qbert",
+    "riverraid",
+    "road-runner",
+    "robotank",
+    "seaquest",
+    "skiing",
+    "solaris",
+    "space-invaders",
+    "star-gunner",
+    "tennis",
+    "time-pilot",
+    "tutankham",
+    "up-n-down",
+    "venture",
+    "video-pinball",
+    "wizard-of-wor",
+    "yars-revenge",
+    "zaxxon",
+]
+
+
+def get_dataset(
+    env_name: str, create_mask: bool = False, mask_size: int = 1
+) -> Tuple[MDPDataset, gym.Env]:
+    """Returns dataset and envrironment by guessing from name.
+
+    This function returns dataset by matching name with the following datasets.
+
+    - cartpole
+    - pendulum
+    - d4rl-pybullet
+    - d4rl-atari
+    - d4rl
+
+    .. code-block:: python
+
+       import d3rlpy
+
+       # cartpole dataset
+       dataset, env = d3rlpy.datasets.get_dataset('cartpole')
+
+       # pendulum dataset
+       dataset, env = d3rlpy.datasets.get_dataset('pendulum')
+
+       # d4rl-pybullet dataset
+       dataset, env = d3rlpy.datasets.get_dataset('hopper-bullet-mixed-v0')
+
+       # d4rl-atari dataset
+       dataset, env = d3rlpy.datasets.get_dataset('breakout-mixed-v0')
+
+       # d4rl dataset
+       dataset, env = d3rlpy.datasets.get_dataset('hopper-medium-v0')
+
+    Args:
+        env_name: environment id of the dataset.
+        create_mask: flag to create binary mask for bootstrapping.
+        mask_size: ensemble size for binary mask.
+
+    Returns:
+        tuple of :class:`d3rlpy.dataset.MDPDataset` and gym environment.
+
+    """
+    if env_name == "cartpole":
+        return get_cartpole(create_mask, mask_size)
+    elif env_name == "pendulum":
+        return get_pendulum(create_mask, mask_size)
+    elif re.match(r"^bullet-.+$", env_name):
+        return get_d4rl(env_name, create_mask, mask_size)
+    elif re.match(r"^.+-bullet-.+$", env_name):
+        return get_pybullet(env_name, create_mask, mask_size)
+    elif re.match(r"hopper|halfcheetah|walker|ant", env_name):
+        return get_d4rl(env_name, create_mask, mask_size)
+    elif re.match(re.compile("|".join(ATARI_GAMES)), env_name):
+        return get_atari(env_name, create_mask, mask_size)
+    raise ValueError(f"Unrecognized env_name: {env_name}.")

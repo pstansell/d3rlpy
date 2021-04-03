@@ -7,11 +7,7 @@ import torch
 from torch.optim import Optimizer
 
 from ...augmentation import AugmentationPipeline
-from ...models.torch import (
-    EnsembleContinuousQFunction,
-    Policy,
-    DeterministicPolicy,
-)
+from ...gpu import Device
 from ...models.builders import (
     create_continuous_q_function,
     create_deterministic_policy,
@@ -19,16 +15,15 @@ from ...models.builders import (
 from ...models.encoders import EncoderFactory
 from ...models.optimizers import OptimizerFactory
 from ...models.q_functions import QFunctionFactory
-from ...gpu import Device
-from ...preprocessing import Scaler, ActionScaler
-from ...torch_utility import (
-    soft_sync,
-    torch_api,
-    train_api,
-    augmentation_api,
+from ...models.torch import (
+    DeterministicPolicy,
+    EnsembleContinuousQFunction,
+    Policy,
 )
-from .utility import ContinuousQFunctionMixin
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import augmentation_api, soft_sync, torch_api, train_api
 from .base import TorchImplBase
+from .utility import ContinuousQFunctionMixin
 
 
 class DDPGBaseImpl(ContinuousQFunctionMixin, TorchImplBase, metaclass=ABCMeta):
@@ -43,8 +38,6 @@ class DDPGBaseImpl(ContinuousQFunctionMixin, TorchImplBase, metaclass=ABCMeta):
     _gamma: float
     _tau: float
     _n_critics: int
-    _bootstrap: bool
-    _share_encoder: bool
     _target_reduction_type: str
     _use_gpu: Optional[Device]
     _q_func: Optional[EnsembleContinuousQFunction]
@@ -68,8 +61,6 @@ class DDPGBaseImpl(ContinuousQFunctionMixin, TorchImplBase, metaclass=ABCMeta):
         gamma: float,
         tau: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
@@ -89,8 +80,6 @@ class DDPGBaseImpl(ContinuousQFunctionMixin, TorchImplBase, metaclass=ABCMeta):
         self._gamma = gamma
         self._tau = tau
         self._n_critics = n_critics
-        self._bootstrap = bootstrap
-        self._share_encoder = share_encoder
         self._target_reduction_type = target_reduction_type
         self._use_gpu = use_gpu
 
@@ -127,8 +116,6 @@ class DDPGBaseImpl(ContinuousQFunctionMixin, TorchImplBase, metaclass=ABCMeta):
             self._critic_encoder_factory,
             self._q_func_factory,
             n_ensembles=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
         )
 
     def _build_critic_optim(self) -> None:

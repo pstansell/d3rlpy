@@ -1,22 +1,22 @@
 from abc import abstractmethod
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import gym
+import numpy as np
 
+from ..argument_utility import ActionScalerArg, ScalerArg
 from ..base import ImplBase, LearnableBase
-from ..envs import BatchEnv
+from ..constants import IMPL_NOT_INITIALIZED_ERROR
 from ..dataset import Transition
-from ..online.iterators import train_single_env, train_batch_env
+from ..envs import BatchEnv
 from ..online.buffers import (
-    Buffer,
     BatchBuffer,
-    ReplayBuffer,
     BatchReplayBuffer,
+    Buffer,
+    ReplayBuffer,
 )
 from ..online.explorers import Explorer
-from ..argument_utility import ScalerArg, ActionScalerArg
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..online.iterators import train_batch_env, train_single_env
 
 
 class AlgoImplBase(ImplBase):
@@ -65,14 +65,16 @@ class AlgoBase(LearnableBase):
         scaler: ScalerArg,
         action_scaler: ActionScalerArg,
         generator: Optional[DataGenerator],
+        kwargs: Dict[str, Any],
     ):
         super().__init__(
-            batch_size,
-            n_frames,
-            n_steps,
-            gamma,
-            scaler,
-            action_scaler,
+            batch_size=batch_size,
+            n_frames=n_frames,
+            n_steps=n_steps,
+            gamma=gamma,
+            scaler=scaler,
+            action_scaler=action_scaler,
+            kwargs=kwargs,
         )
         self._generator = generator
 
@@ -203,7 +205,7 @@ class AlgoBase(LearnableBase):
         logdir: str = "d3rlpy_logs",
         verbose: bool = True,
         show_progress: bool = True,
-        tensorboard: bool = True,
+        tensorboard_dir: Optional[str] = None,
         timelimit_aware: bool = True,
     ) -> None:
         """Start training loop of online deep reinforcement learning.
@@ -228,8 +230,9 @@ class AlgoBase(LearnableBase):
             logdir: root directory name to save logs.
             verbose: flag to show logged information on stdout.
             show_progress: flag to show progress bar for iterations.
-            tensorboard: flag to save logged information in tensorboard
-                (additional to the csv data)
+            tensorboard_dir: directory to save logged information in
+                tensorboard (additional to the csv data).  if ``None``, the
+                directory will not be created.
             timelimit_aware: flag to turn ``terminal`` flag ``False`` when
                 ``TimeLimit.truncated`` flag is ``True``, which is designed to
                 incorporate with ``gym.wrappers.TimeLimit``.
@@ -258,7 +261,7 @@ class AlgoBase(LearnableBase):
             logdir=logdir,
             verbose=verbose,
             show_progress=show_progress,
-            tensorboard=tensorboard,
+            tensorboard_dir=tensorboard_dir,
             timelimit_aware=timelimit_aware,
         )
 
@@ -280,7 +283,7 @@ class AlgoBase(LearnableBase):
         logdir: str = "d3rlpy_logs",
         verbose: bool = True,
         show_progress: bool = True,
-        tensorboard: bool = True,
+        tensorboard_dir: Optional[str] = None,
         timelimit_aware: bool = True,
     ) -> None:
         """Start training loop of batch online deep reinforcement learning.
@@ -306,8 +309,9 @@ class AlgoBase(LearnableBase):
             logdir: root directory name to save logs.
             verbose: flag to show logged information on stdout.
             show_progress: flag to show progress bar for iterations.
-            tensorboard: flag to save logged information in tensorboard
-                (additional to the csv data)
+            tensorboard_dir: directory to save logged information in
+                tensorboard (additional to the csv data).  if ``None``, the
+                directory will not be created.
             timelimit_aware: flag to turn ``terminal`` flag ``False`` when
                 ``TimeLimit.truncated`` flag is ``True``, which is designed to
                 incorporate with ``gym.wrappers.TimeLimit``.
@@ -336,7 +340,7 @@ class AlgoBase(LearnableBase):
             logdir=logdir,
             verbose=verbose,
             show_progress=show_progress,
-            tensorboard=tensorboard,
+            tensorboard_dir=tensorboard_dir,
             timelimit_aware=timelimit_aware,
         )
 

@@ -3,13 +3,13 @@ import torch
 
 from d3rlpy.algos.torch.bcq_impl import BCQImpl, DiscreteBCQImpl
 from d3rlpy.augmentation import DrQPipeline
-from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.encoders import DefaultEncoderFactory
+from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.q_functions import create_q_func_factory
 from tests.algos.algo_test import (
-    torch_impl_tester,
-    DummyScaler,
     DummyActionScaler,
+    DummyScaler,
+    torch_impl_tester,
 )
 
 
@@ -26,8 +26,6 @@ from tests.algos.algo_test import (
 @pytest.mark.parametrize("gamma", [0.99])
 @pytest.mark.parametrize("tau", [0.05])
 @pytest.mark.parametrize("n_critics", [2])
-@pytest.mark.parametrize("bootstrap", [False])
-@pytest.mark.parametrize("share_encoder", [False, True])
 @pytest.mark.parametrize("lam", [0.75])
 @pytest.mark.parametrize("n_action_samples", [10])  # small for test
 @pytest.mark.parametrize("action_flexibility", [0.05])
@@ -50,8 +48,6 @@ def test_bcq_impl(
     gamma,
     tau,
     n_critics,
-    bootstrap,
-    share_encoder,
     lam,
     n_action_samples,
     action_flexibility,
@@ -62,29 +58,27 @@ def test_bcq_impl(
     augmentation,
 ):
     impl = BCQImpl(
-        observation_shape,
-        action_size,
-        actor_learning_rate,
-        critic_learning_rate,
-        imitator_learning_rate,
-        actor_optim_factory,
-        critic_optim_factory,
-        imitator_optim_factory,
-        encoder_factory,
-        encoder_factory,
-        encoder_factory,
-        create_q_func_factory(q_func_factory),
-        gamma,
-        tau,
-        n_critics,
-        bootstrap,
-        share_encoder,
-        lam,
-        n_action_samples,
-        action_flexibility,
-        latent_size,
-        beta,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        actor_learning_rate=actor_learning_rate,
+        critic_learning_rate=critic_learning_rate,
+        imitator_learning_rate=imitator_learning_rate,
+        actor_optim_factory=actor_optim_factory,
+        critic_optim_factory=critic_optim_factory,
+        imitator_optim_factory=imitator_optim_factory,
+        actor_encoder_factory=encoder_factory,
+        critic_encoder_factory=encoder_factory,
+        imitator_encoder_factory=encoder_factory,
+        q_func_factory=create_q_func_factory(q_func_factory),
+        gamma=gamma,
+        tau=tau,
+        n_critics=n_critics,
+        lam=lam,
+        n_action_samples=n_action_samples,
+        action_flexibility=action_flexibility,
+        latent_size=latent_size,
+        beta=beta,
+        use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
         augmentation=augmentation,
@@ -123,8 +117,6 @@ def test_bcq_impl(
 @pytest.mark.parametrize("q_func_factory", ["mean", "qr", "iqn", "fqf"])
 @pytest.mark.parametrize("gamma", [0.99])
 @pytest.mark.parametrize("n_critics", [1])
-@pytest.mark.parametrize("bootstrap", [False])
-@pytest.mark.parametrize("share_encoder", [False, True])
 @pytest.mark.parametrize("target_reduction_type", ["min"])
 @pytest.mark.parametrize("action_flexibility", [0.3])
 @pytest.mark.parametrize("beta", [1e-2])
@@ -139,8 +131,6 @@ def test_discrete_bcq_impl(
     q_func_factory,
     gamma,
     n_critics,
-    bootstrap,
-    share_encoder,
     target_reduction_type,
     action_flexibility,
     beta,
@@ -148,20 +138,18 @@ def test_discrete_bcq_impl(
     augmentation,
 ):
     impl = DiscreteBCQImpl(
-        observation_shape,
-        action_size,
-        learning_rate,
-        optim_factory,
-        encoder_factory,
-        create_q_func_factory(q_func_factory),
-        gamma,
-        n_critics,
-        bootstrap,
-        share_encoder,
-        target_reduction_type,
-        action_flexibility,
-        beta,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        learning_rate=learning_rate,
+        optim_factory=optim_factory,
+        encoder_factory=encoder_factory,
+        q_func_factory=create_q_func_factory(q_func_factory),
+        gamma=gamma,
+        n_critics=n_critics,
+        target_reduction_type=target_reduction_type,
+        action_flexibility=action_flexibility,
+        beta=beta,
+        use_gpu=None,
         scaler=scaler,
         augmentation=augmentation,
     )

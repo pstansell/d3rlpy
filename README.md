@@ -1,6 +1,6 @@
 <p align="center"><img align="center" width="300px" src="assets/logo.png"></p>
 
-# d3rlpy: A data-driven deep reinforcement learning library as an out-of-the-box tool
+# d3rlpy: An offline deep reinforcement learning library
 
 ![test](https://github.com/takuseno/d3rlpy/workflows/test/badge.svg)
 ![build](https://github.com/takuseno/d3rlpy/workflows/build/badge.svg)
@@ -10,7 +10,7 @@
 [![Gitter](https://img.shields.io/gitter/room/d3rlpy/d3rlpy)](https://gitter.im/d3rlpy/d3rlpy)
 ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
-d3rlpy is a data-driven deep reinforcement learning library as an out-of-the-box tool.
+d3rlpy is an offline deep reinforcement learning library for practitioners and researchers.
 
 ```py
 import d3rlpy
@@ -18,7 +18,7 @@ import d3rlpy
 # MDPDataset takes arrays of state transitions
 dataset = d3rlpy.dataset.MDPDataset(observations, actions, rewards, terminals)
 
-# train data-driven deep RL
+# train offline deep RL
 cql = d3rlpy.algos.CQL()
 cql.fit(dataset.episodes)
 
@@ -76,7 +76,7 @@ $ pip install -e .
 ```
 
 ## supported algorithms
-| algorithm | discrete control | continuous control | data-driven RL? |
+| algorithm | discrete control | continuous control | offline RL? |
 |:-|:-:|:-:|:-:|
 | Behavior Cloning (supervised learning) | :white_check_mark: | :white_check_mark: | |
 | [Deep Q-Network (DQN)](https://www.nature.com/articles/nature14236) | :white_check_mark: | :no_entry: | |
@@ -212,11 +212,27 @@ Try a cartpole example on Google Colaboratory!
 Any kind of contribution to d3rlpy would be highly appreciated!
 Please check the [contribution guide](CONTRIBUTING.md).
 
+The release planning can be checked at [milestones](https://github.com/takuseno/d3rlpy/milestones).
+
+## community
+| Channel | Link |
+|:-|:-|
+| Chat | [Gitter](https://gitter.im/d3rlpy/d3rlpy) |
+| Issues | [GitHub Issues](https://github.com/takuseno/d3rlpy/issues) |
+| Discussion | [GitHub Discussions](https://github.com/takuseno/d3rlpy/discussions)
+
+## family projects
+| Project | Description |
+|:-:|:-|
+| [d4rl-pybullet](https://github.com/takuseno/d4rl-pybullet) | An offline RL datasets of PyBullet tasks |
+| [d4rl-atari](https://github.com/takuseno/d4rl-atari) | A d4rl-style library of Google's Atari 2600 datasets |
+| [MINERVA](https://github.com/takuseno/minerva) | An out-of-the-box GUI tool for offline RL |
+
 ## citation
 ```
 @misc{seno2020d3rlpy,
   author = {Takuma Seno},
-  title = {d3rlpy: A data-driven deep reinforcement library as an out-of-the-box tool},
+  title = {d3rlpy: An offline deep reinforcement library},
   year = {2020},
   publisher = {GitHub},
   journal = {GitHub repository},

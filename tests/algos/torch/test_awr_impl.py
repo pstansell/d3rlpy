@@ -2,12 +2,12 @@ import pytest
 
 from d3rlpy.algos.torch.awr_impl import AWRImpl, DiscreteAWRImpl
 from d3rlpy.augmentation import DrQPipeline
-from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.encoders import DefaultEncoderFactory
+from d3rlpy.models.optimizers import AdamFactory
 from tests.algos.algo_test import (
-    torch_impl_tester,
-    DummyScaler,
     DummyActionScaler,
+    DummyScaler,
+    torch_impl_tester,
 )
 
 
@@ -34,15 +34,15 @@ def test_awr_impl(
     augmentation,
 ):
     impl = AWRImpl(
-        observation_shape,
-        action_size,
-        actor_learning_rate,
-        critic_learning_rate,
-        actor_optim_factory,
-        critic_optim_factory,
-        encoder_factory,
-        encoder_factory,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        actor_learning_rate=actor_learning_rate,
+        critic_learning_rate=critic_learning_rate,
+        actor_optim_factory=actor_optim_factory,
+        critic_optim_factory=critic_optim_factory,
+        actor_encoder_factory=encoder_factory,
+        critic_encoder_factory=encoder_factory,
+        use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
         augmentation=augmentation,
@@ -71,15 +71,15 @@ def test_discrete_awr_impl(
     augmentation,
 ):
     impl = DiscreteAWRImpl(
-        observation_shape,
-        action_size,
-        actor_learning_rate,
-        critic_learning_rate,
-        actor_optim_factory,
-        critic_optim_factory,
-        encoder_factory,
-        encoder_factory,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        actor_learning_rate=actor_learning_rate,
+        critic_learning_rate=critic_learning_rate,
+        actor_optim_factory=actor_optim_factory,
+        critic_optim_factory=critic_optim_factory,
+        actor_encoder_factory=encoder_factory,
+        critic_encoder_factory=encoder_factory,
+        use_gpu=None,
         scaler=scaler,
         action_scaler=None,
         augmentation=augmentation,

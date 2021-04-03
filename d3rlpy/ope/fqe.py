@@ -1,20 +1,25 @@
-from abc import abstractmethod
 from typing import Any, List, Optional, Sequence, Union
 
 import numpy as np
 
 from ..algos import AlgoBase
-from ..argument_utility import check_encoder, EncoderArg
-from ..argument_utility import check_use_gpu, UseGPUArg
-from ..argument_utility import check_q_func, QFuncArg
-from ..argument_utility import ScalerArg, ActionScalerArg
+from ..argument_utility import (
+    ActionScalerArg,
+    EncoderArg,
+    QFuncArg,
+    ScalerArg,
+    UseGPUArg,
+    check_encoder,
+    check_q_func,
+    check_use_gpu,
+)
+from ..constants import ALGO_NOT_GIVEN_ERROR, IMPL_NOT_INITIALIZED_ERROR
 from ..dataset import TransitionMiniBatch
-from ..models.encoders import EncoderFactory
-from ..models.optimizers import OptimizerFactory, AdamFactory
-from ..models.q_functions import QFunctionFactory
 from ..gpu import Device
-from .torch.fqe_impl import FQEBaseImpl, FQEImpl, DiscreteFQEImpl
-from ..constants import IMPL_NOT_INITIALIZED_ERROR, ALGO_NOT_GIVEN_ERROR
+from ..models.encoders import EncoderFactory
+from ..models.optimizers import AdamFactory, OptimizerFactory
+from ..models.q_functions import QFunctionFactory
+from .torch.fqe_impl import DiscreteFQEImpl, FQEBaseImpl, FQEImpl
 
 
 class _FQEBase(AlgoBase):
@@ -24,9 +29,7 @@ class _FQEBase(AlgoBase):
     _optim_factory: OptimizerFactory
     _encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _bootstrap: bool
     _n_critics: int
-    _share_encoder: bool
     _target_update_interval: int
     _use_gpu: Optional[Device]
     _impl: Optional[FQEBaseImpl]
@@ -44,8 +47,6 @@ class _FQEBase(AlgoBase):
         n_steps: int = 1,
         gamma: float = 0.99,
         n_critics: int = 1,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         target_update_interval: int = 100,
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
@@ -61,15 +62,14 @@ class _FQEBase(AlgoBase):
             scaler=scaler,
             action_scaler=action_scaler,
             generator=None,
+            kwargs=kwargs,
         )
         self._algo = algo
         self._learning_rate = learning_rate
         self._optim_factory = optim_factory
         self._encoder_factory = check_encoder(encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._bootstrap = bootstrap
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._target_update_interval = target_update_interval
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
@@ -85,12 +85,6 @@ class _FQEBase(AlgoBase):
     def sample_action(self, x: Union[np.ndarray, List[Any]]) -> np.ndarray:
         assert self._algo is not None, ALGO_NOT_GIVEN_ERROR
         return self._algo.sample_action(x)
-
-    @abstractmethod
-    def create_impl(
-        self, observation_shape: Sequence[int], action_size: int
-    ) -> None:
-        pass
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
@@ -148,8 +142,6 @@ class FQE(_FQEBase):
         n_steps (int): N-step TD calculation.
         gamma (float): discount factor.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         target_update_interval (int): interval to update the target network.
         use_gpu (bool, int or d3rlpy.gpu.Device):
             flag to use GPU, device ID or device.
@@ -163,7 +155,7 @@ class FQE(_FQEBase):
 
     _impl: Optional[FQEImpl]
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = FQEImpl(
@@ -175,8 +167,6 @@ class FQE(_FQEBase):
             q_func_factory=self._q_func_factory,
             gamma=self._gamma,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=self._action_scaler,
@@ -217,8 +207,6 @@ class DiscreteFQE(_FQEBase):
         n_steps (int): N-step TD calculation.
         gamma (float): discount factor.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         target_update_interval (int): interval to update the target network.
         use_gpu (bool, int or d3rlpy.gpu.Device):
             flag to use GPU, device ID or device.
@@ -232,7 +220,7 @@ class DiscreteFQE(_FQEBase):
 
     _impl: Optional[DiscreteFQEImpl]
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = DiscreteFQEImpl(
@@ -244,8 +232,6 @@ class DiscreteFQE(_FQEBase):
             q_func_factory=self._q_func_factory,
             gamma=self._gamma,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=None,

@@ -1,9 +1,9 @@
 import pytest
 
 from d3rlpy.dynamics.torch.mopo_impl import MOPOImpl
-from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.encoders import DefaultEncoderFactory
-from tests.algos.algo_test import DummyScaler, DummyActionScaler
+from d3rlpy.models.optimizers import AdamFactory
+from tests.algos.algo_test import DummyActionScaler, DummyScaler
 from tests.dynamics.dynamics_test import torch_impl_tester
 
 
@@ -30,15 +30,15 @@ def test_mopo_impl(
     action_scaler,
 ):
     impl = MOPOImpl(
-        observation_shape,
-        action_size,
-        learning_rate,
-        optim_factory,
-        encoder_factory,
-        n_ensembles,
-        lam,
-        discrete_action,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        learning_rate=learning_rate,
+        optim_factory=optim_factory,
+        encoder_factory=encoder_factory,
+        n_ensembles=n_ensembles,
+        lam=lam,
+        discrete_action=discrete_action,
+        use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler if not discrete_action else None,
     )

@@ -2,20 +2,27 @@ from typing import Any, List, Optional, Sequence, Union
 
 import numpy as np
 
+from ..argument_utility import (
+    ActionScalerArg,
+    AugmentationArg,
+    EncoderArg,
+    QFuncArg,
+    ScalerArg,
+    UseGPUArg,
+    check_augmentation,
+    check_encoder,
+    check_q_func,
+    check_use_gpu,
+)
+from ..augmentation import AugmentationPipeline
+from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..dataset import TransitionMiniBatch
+from ..gpu import Device
+from ..models.encoders import EncoderFactory
+from ..models.optimizers import AdamFactory, OptimizerFactory
+from ..models.q_functions import QFunctionFactory
 from .base import AlgoBase, DataGenerator
 from .torch.bcq_impl import BCQImpl, DiscreteBCQImpl
-from ..augmentation import AugmentationPipeline
-from ..dataset import TransitionMiniBatch
-from ..models.optimizers import OptimizerFactory, AdamFactory
-from ..models.encoders import EncoderFactory
-from ..models.q_functions import QFunctionFactory
-from ..gpu import Device
-from ..argument_utility import check_encoder, EncoderArg
-from ..argument_utility import check_use_gpu, UseGPUArg
-from ..argument_utility import check_augmentation, AugmentationArg
-from ..argument_utility import check_q_func, QFuncArg
-from ..argument_utility import ScalerArg, ActionScalerArg
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
 
 
 class BCQ(AlgoBase):
@@ -117,8 +124,6 @@ class BCQ(AlgoBase):
         gamma (float): discount factor.
         tau (float): target network synchronization coefficiency.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         update_actor_interval (int): interval to update policy function.
         lam (float): weight factor for critic ensemble.
         n_action_samples (int): the number of action samples to estimate
@@ -154,9 +159,7 @@ class BCQ(AlgoBase):
     _imitator_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
     _tau: float
-    _bootstrap: bool
     _n_critics: int
-    _share_encoder: bool
     _update_actor_interval: int
     _lam: float
     _n_action_samples: int
@@ -187,8 +190,6 @@ class BCQ(AlgoBase):
         gamma: float = 0.99,
         tau: float = 0.005,
         n_critics: int = 2,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         update_actor_interval: int = 1,
         lam: float = 0.75,
         n_action_samples: int = 100,
@@ -212,6 +213,7 @@ class BCQ(AlgoBase):
             scaler=scaler,
             action_scaler=action_scaler,
             generator=generator,
+            kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
         self._critic_learning_rate = critic_learning_rate
@@ -224,9 +226,7 @@ class BCQ(AlgoBase):
         self._imitator_encoder_factory = check_encoder(imitator_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
         self._tau = tau
-        self._bootstrap = bootstrap
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._update_actor_interval = update_actor_interval
         self._lam = lam
         self._n_action_samples = n_action_samples
@@ -238,7 +238,7 @@ class BCQ(AlgoBase):
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = BCQImpl(
@@ -257,8 +257,6 @@ class BCQ(AlgoBase):
             gamma=self._gamma,
             tau=self._tau,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             lam=self._lam,
             n_action_samples=self._n_action_samples,
             action_flexibility=self._action_flexibility,
@@ -360,8 +358,6 @@ class DiscreteBCQ(AlgoBase):
         n_steps (int): N-step TD calculation.
         gamma (float): discount factor.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         target_reduction_type (str): ensemble reduction method at target value
             estimation. The available options are
             ``['min', 'max', 'mean', 'mix', 'none']``.
@@ -386,9 +382,7 @@ class DiscreteBCQ(AlgoBase):
     _optim_factory: OptimizerFactory
     _encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _bootstrap: bool
     _n_critics: int
-    _share_encoder: bool
     _target_reduction_type: str
     _action_flexibility: float
     _beta: float
@@ -409,8 +403,6 @@ class DiscreteBCQ(AlgoBase):
         n_steps: int = 1,
         gamma: float = 0.99,
         n_critics: int = 1,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         target_reduction_type: str = "min",
         action_flexibility: float = 0.3,
         beta: float = 0.5,
@@ -430,14 +422,13 @@ class DiscreteBCQ(AlgoBase):
             scaler=scaler,
             action_scaler=None,
             generator=generator,
+            kwargs=kwargs,
         )
         self._learning_rate = learning_rate
         self._optim_factory = optim_factory
         self._encoder_factory = check_encoder(encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._bootstrap = bootstrap
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._target_reduction_type = target_reduction_type
         self._action_flexibility = action_flexibility
         self._beta = beta
@@ -446,7 +437,7 @@ class DiscreteBCQ(AlgoBase):
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = DiscreteBCQImpl(
@@ -458,8 +449,6 @@ class DiscreteBCQ(AlgoBase):
             q_func_factory=self._q_func_factory,
             gamma=self._gamma,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             target_reduction_type=self._target_reduction_type,
             action_flexibility=self._action_flexibility,
             beta=self._beta,

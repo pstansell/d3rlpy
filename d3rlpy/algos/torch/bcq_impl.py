@@ -5,25 +5,25 @@ import numpy as np
 import torch
 from torch.optim import Optimizer
 
-from ...models.torch import (
-    PixelEncoder,
-    DeterministicResidualPolicy,
-    compute_max_with_n_actions,
-    ConditionalVAE,
-    DiscreteImitator,
-)
-from ...models.builders import (
-    create_deterministic_residual_policy,
-    create_conditional_vae,
-    create_discrete_imitator,
-)
-from ...models.optimizers import OptimizerFactory
-from ...models.encoders import EncoderFactory
-from ...models.q_functions import QFunctionFactory
-from ...preprocessing import Scaler, ActionScaler
 from ...augmentation import AugmentationPipeline
 from ...gpu import Device
-from ...torch_utility import torch_api, train_api, augmentation_api
+from ...models.builders import (
+    create_conditional_vae,
+    create_deterministic_residual_policy,
+    create_discrete_imitator,
+)
+from ...models.encoders import EncoderFactory
+from ...models.optimizers import OptimizerFactory
+from ...models.q_functions import QFunctionFactory
+from ...models.torch import (
+    ConditionalVAE,
+    DeterministicResidualPolicy,
+    DiscreteImitator,
+    PixelEncoder,
+    compute_max_with_n_actions,
+)
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import augmentation_api, torch_api, train_api
 from .ddpg_impl import DDPGBaseImpl
 from .dqn_impl import DoubleDQNImpl
 
@@ -60,8 +60,6 @@ class BCQImpl(DDPGBaseImpl):
         gamma: float,
         tau: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         lam: float,
         n_action_samples: int,
         action_flexibility: float,
@@ -85,8 +83,6 @@ class BCQImpl(DDPGBaseImpl):
             gamma=gamma,
             tau=tau,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type="mix",
             use_gpu=use_gpu,
             scaler=scaler,
@@ -255,8 +251,6 @@ class DiscreteBCQImpl(DoubleDQNImpl):
         q_func_factory: QFunctionFactory,
         gamma: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         action_flexibility: float,
         beta: float,
@@ -273,8 +267,6 @@ class DiscreteBCQImpl(DoubleDQNImpl):
             q_func_factory=q_func_factory,
             gamma=gamma,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type=target_reduction_type,
             use_gpu=use_gpu,
             scaler=scaler,

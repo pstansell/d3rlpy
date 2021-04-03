@@ -2,24 +2,19 @@
 
 from typing import Optional, Sequence
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
 
 from ...augmentation import AugmentationPipeline
-from ...models.torch import NormalPolicy, squash_action
-from ...models.builders import create_normal_policy
+from ...gpu import Device
+from ...models.builders import create_squashed_normal_policy
 from ...models.encoders import EncoderFactory
 from ...models.optimizers import OptimizerFactory
 from ...models.q_functions import QFunctionFactory
-from ...gpu import Device
-from ...preprocessing import Scaler, ActionScaler
-from ...torch_utility import (
-    hard_sync,
-    torch_api,
-    train_api,
-    augmentation_api,
-)
+from ...models.torch import SquashedNormalPolicy, squash_action
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import augmentation_api, hard_sync, torch_api, train_api
 from .ddpg_impl import DDPGBaseImpl
 
 
@@ -30,8 +25,8 @@ class CRRImpl(DDPGBaseImpl):
     _advantage_type: str
     _weight_type: str
     _max_weight: float
-    _policy: Optional[NormalPolicy]
-    _targ_policy: Optional[NormalPolicy]
+    _policy: Optional[SquashedNormalPolicy]
+    _targ_policy: Optional[SquashedNormalPolicy]
 
     def __init__(
         self,
@@ -51,8 +46,6 @@ class CRRImpl(DDPGBaseImpl):
         weight_type: str,
         max_weight: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
@@ -72,8 +65,6 @@ class CRRImpl(DDPGBaseImpl):
             gamma=gamma,
             tau=0.0,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type=target_reduction_type,
             use_gpu=use_gpu,
             scaler=scaler,
@@ -87,7 +78,7 @@ class CRRImpl(DDPGBaseImpl):
         self._max_weight = max_weight
 
     def _build_actor(self) -> None:
-        self._policy = create_normal_policy(
+        self._policy = create_squashed_normal_policy(
             self._observation_shape,
             self._action_size,
             self._actor_encoder_factory,

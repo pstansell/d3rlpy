@@ -6,16 +6,16 @@ import torch
 from torch.optim import Optimizer
 
 from ...augmentation import AugmentationPipeline
-from ...models.torch import EnsembleDiscreteQFunction
-from ...models.builders import create_discrete_q_function
-from ...models.optimizers import OptimizerFactory
-from ...models.encoders import EncoderFactory
-from ...models.q_functions import QFunctionFactory
-from ...preprocessing import Scaler
 from ...gpu import Device
-from ...torch_utility import hard_sync, torch_api, train_api, augmentation_api
-from .utility import DiscreteQFunctionMixin
+from ...models.builders import create_discrete_q_function
+from ...models.encoders import EncoderFactory
+from ...models.optimizers import OptimizerFactory
+from ...models.q_functions import QFunctionFactory
+from ...models.torch import EnsembleDiscreteQFunction
+from ...preprocessing import Scaler
+from ...torch_utility import augmentation_api, hard_sync, torch_api, train_api
 from .base import TorchImplBase
+from .utility import DiscreteQFunctionMixin
 
 
 class DQNImpl(DiscreteQFunctionMixin, TorchImplBase):
@@ -26,8 +26,6 @@ class DQNImpl(DiscreteQFunctionMixin, TorchImplBase):
     _q_func_factory: QFunctionFactory
     _gamma: float
     _n_critics: int
-    _bootstrap: bool
-    _share_encoder: bool
     _target_reduction_type: str
     _use_gpu: Optional[Device]
     _q_func: Optional[EnsembleDiscreteQFunction]
@@ -44,8 +42,6 @@ class DQNImpl(DiscreteQFunctionMixin, TorchImplBase):
         q_func_factory: QFunctionFactory,
         gamma: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
@@ -60,8 +56,6 @@ class DQNImpl(DiscreteQFunctionMixin, TorchImplBase):
         self._q_func_factory = q_func_factory
         self._gamma = gamma
         self._n_critics = n_critics
-        self._bootstrap = bootstrap
-        self._share_encoder = share_encoder
         self._target_reduction_type = target_reduction_type
         self._use_gpu = use_gpu
 
@@ -92,8 +86,6 @@ class DQNImpl(DiscreteQFunctionMixin, TorchImplBase):
             self._encoder_factory,
             self._q_func_factory,
             n_ensembles=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
         )
 
     def _build_optim(self) -> None:

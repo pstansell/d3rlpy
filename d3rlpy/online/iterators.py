@@ -1,17 +1,17 @@
 from typing import Any, Callable, List, Optional, Union
 
-import numpy as np
 import gym
+import numpy as np
 from tqdm import trange
 from typing_extensions import Protocol
 
 from ..dataset import TransitionMiniBatch
 from ..envs import BatchEnv
-from ..logger import D3RLPyLogger
-from ..preprocessing import Scaler, ActionScaler
-from ..preprocessing.stack import StackedObservation, BatchStackedObservation
+from ..logger import LOG, D3RLPyLogger
 from ..metrics.scorer import evaluate_on_environment
-from .buffers import Buffer, BatchBuffer
+from ..preprocessing import ActionScaler, Scaler
+from ..preprocessing.stack import BatchStackedObservation, StackedObservation
+from .buffers import BatchBuffer, Buffer
 from .explorers import Explorer
 
 
@@ -72,17 +72,15 @@ class _AlgoProtocol(Protocol):
         ...
 
 
-def _setup_algo(
-    algo: _AlgoProtocol, env: gym.Env, logger: D3RLPyLogger
-) -> None:
+def _setup_algo(algo: _AlgoProtocol, env: gym.Env) -> None:
     # initialize scaler
     if algo.scaler:
-        logger.debug("Fitting scaler...", scler=algo.scaler.get_type())
+        LOG.debug("Fitting scaler...", scler=algo.scaler.get_type())
         algo.scaler.fit_with_env(env)
 
     # initialize action scaler
     if algo.action_scaler:
-        logger.debug(
+        LOG.debug(
             "Fitting action scaler...",
             action_scler=algo.action_scaler.get_type(),
         )
@@ -90,9 +88,9 @@ def _setup_algo(
 
     # setup algorithm
     if algo.impl is None:
-        logger.debug("Building model...")
+        LOG.debug("Building model...")
         algo.build_with_env(env)
-        logger.debug("Model has been built.")
+        LOG.debug("Model has been built.")
 
 
 def train_single_env(
@@ -113,7 +111,7 @@ def train_single_env(
     logdir: str = "d3rlpy_logs",
     verbose: bool = True,
     show_progress: bool = True,
-    tensorboard: bool = True,
+    tensorboard_dir: Optional[str] = None,
     timelimit_aware: bool = True,
 ) -> None:
     """Start training loop of online deep reinforcement learning.
@@ -139,8 +137,9 @@ def train_single_env(
         logdir: root directory name to save logs.
         verbose: flag to show logged information on stdout.
         show_progress: flag to show progress bar for iterations.
-        tensorboard: flag to save logged information in tensorboard
-            (additional to the csv data)
+        tensorboard_dir: directory to save logged information in
+                tensorboard (additional to the csv data).  if ``None``, the
+                directory will not be created.
         timelimit_aware: flag to turn ``terminal`` flag ``False`` when
             ``TimeLimit.truncated`` flag is ``True``, which is designed to
             incorporate with ``gym.wrappers.TimeLimit``.
@@ -155,12 +154,12 @@ def train_single_env(
         save_metrics=save_metrics,
         root_dir=logdir,
         verbose=verbose,
-        tensorboard=tensorboard,
+        tensorboard_dir=tensorboard_dir,
         with_timestamp=with_timestamp,
     )
 
     # initialize algorithm parameters
-    _setup_algo(algo, env, logger)
+    _setup_algo(algo, env)
 
     observation_shape = env.observation_space.shape
     is_image = len(observation_shape) == 3
@@ -287,7 +286,7 @@ def train_batch_env(
     logdir: str = "d3rlpy_logs",
     verbose: bool = True,
     show_progress: bool = True,
-    tensorboard: bool = True,
+    tensorboard_dir: Optional[str] = None,
     timelimit_aware: bool = True,
 ) -> None:
     """Start training loop of online deep reinforcement learning.
@@ -313,8 +312,9 @@ def train_batch_env(
         logdir: root directory name to save logs.
         verbose: flag to show logged information on stdout.
         show_progress: flag to show progress bar for iterations.
-        tensorboard: flag to save logged information in tensorboard
-            (additional to the csv data)
+        tensorboard_dir: directory to save logged information in
+                tensorboard (additional to the csv data).  if ``None``, the
+                directory will not be created.
         timelimit_aware: flag to turn ``terminal`` flag ``False`` when
             ``TimeLimit.truncated`` flag is ``True``, which is designed to
             incorporate with ``gym.wrappers.TimeLimit``.
@@ -329,12 +329,12 @@ def train_batch_env(
         save_metrics=save_metrics,
         root_dir=logdir,
         verbose=verbose,
-        tensorboard=tensorboard,
+        tensorboard_dir=tensorboard_dir,
         with_timestamp=with_timestamp,
     )
 
     # initialize algorithm parameters
-    _setup_algo(algo, env, logger)
+    _setup_algo(algo, env)
 
     observation_shape = env.observation_space.shape
     is_image = len(observation_shape) == 3

@@ -1,18 +1,26 @@
 from typing import Any, List, Optional, Sequence
+
+from ..argument_utility import (
+    ActionScalerArg,
+    AugmentationArg,
+    EncoderArg,
+    QFuncArg,
+    ScalerArg,
+    UseGPUArg,
+    check_augmentation,
+    check_encoder,
+    check_q_func,
+    check_use_gpu,
+)
+from ..augmentation import AugmentationPipeline
+from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..dataset import TransitionMiniBatch
+from ..gpu import Device
+from ..models.encoders import EncoderFactory
+from ..models.optimizers import AdamFactory, OptimizerFactory
+from ..models.q_functions import QFunctionFactory
 from .base import AlgoBase, DataGenerator
 from .torch.awac_impl import AWACImpl
-from ..dataset import TransitionMiniBatch
-from ..models.optimizers import OptimizerFactory, AdamFactory
-from ..models.encoders import EncoderFactory
-from ..models.q_functions import QFunctionFactory
-from ..augmentation import AugmentationPipeline
-from ..gpu import Device
-from ..argument_utility import ScalerArg, ActionScalerArg
-from ..argument_utility import check_encoder, EncoderArg
-from ..argument_utility import check_use_gpu, UseGPUArg
-from ..argument_utility import check_q_func, QFuncArg
-from ..argument_utility import check_augmentation, AugmentationArg
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
 
 
 class AWAC(AlgoBase):
@@ -63,8 +71,6 @@ class AWAC(AlgoBase):
             :math:`A^\pi(s_t, a_t)`.
         max_weight (float): maximum weight for cross-entropy loss.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         target_reduction_type (str): ensemble reduction method at target value
             estimation. The available options are
             ``['min', 'max', 'mean', 'mix', 'none']``.
@@ -94,9 +100,7 @@ class AWAC(AlgoBase):
     _lam: float
     _n_action_samples: int
     _max_weight: float
-    _bootstrap: bool
     _n_critics: int
-    _share_encoder: bool
     _target_reduction_type: str
     _update_actor_interval: int
     _use_gpu: Optional[Device]
@@ -122,8 +126,6 @@ class AWAC(AlgoBase):
         n_action_samples: int = 1,
         max_weight: float = 20.0,
         n_critics: int = 2,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         target_reduction_type: str = "min",
         update_actor_interval: int = 1,
         use_gpu: UseGPUArg = False,
@@ -142,6 +144,7 @@ class AWAC(AlgoBase):
             scaler=scaler,
             action_scaler=action_scaler,
             generator=generator,
+            kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
         self._critic_learning_rate = critic_learning_rate
@@ -154,16 +157,14 @@ class AWAC(AlgoBase):
         self._lam = lam
         self._n_action_samples = n_action_samples
         self._max_weight = max_weight
-        self._bootstrap = bootstrap
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
         self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = AWACImpl(
@@ -182,8 +183,6 @@ class AWAC(AlgoBase):
             n_action_samples=self._n_action_samples,
             max_weight=self._max_weight,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,

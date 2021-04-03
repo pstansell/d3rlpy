@@ -1,18 +1,26 @@
 from typing import Any, List, Optional, Sequence
-from .base import AlgoBase, DataGenerator
-from .torch.sac_impl import SACImpl, DiscreteSACImpl
+
+from ..argument_utility import (
+    ActionScalerArg,
+    AugmentationArg,
+    EncoderArg,
+    QFuncArg,
+    ScalerArg,
+    UseGPUArg,
+    check_augmentation,
+    check_encoder,
+    check_q_func,
+    check_use_gpu,
+)
 from ..augmentation import AugmentationPipeline
-from ..dataset import TransitionMiniBatch
-from ..models.encoders import EncoderFactory
-from ..models.q_functions import QFunctionFactory
-from ..models.optimizers import OptimizerFactory, AdamFactory
-from ..gpu import Device
-from ..argument_utility import check_encoder, EncoderArg
-from ..argument_utility import check_use_gpu, UseGPUArg
-from ..argument_utility import check_augmentation, AugmentationArg
-from ..argument_utility import check_q_func, QFuncArg
-from ..argument_utility import ScalerArg, ActionScalerArg
 from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..dataset import TransitionMiniBatch
+from ..gpu import Device
+from ..models.encoders import EncoderFactory
+from ..models.optimizers import AdamFactory, OptimizerFactory
+from ..models.q_functions import QFunctionFactory
+from .base import AlgoBase, DataGenerator
+from .torch.sac_impl import DiscreteSACImpl, SACImpl
 
 
 class SAC(AlgoBase):
@@ -80,8 +88,6 @@ class SAC(AlgoBase):
         gamma (float): discount factor.
         tau (float): target network synchronization coefficiency.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         target_reduction_type (str): ensemble reduction method at target value
             estimation. The available options are
             ``['min', 'max', 'mean', 'mix', 'none']``.
@@ -111,9 +117,7 @@ class SAC(AlgoBase):
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
     _tau: float
-    _bootstrap: bool
     _n_critics: int
-    _share_encoder: bool
     _target_reduction_type: str
     _update_actor_interval: int
     _initial_temperature: float
@@ -139,8 +143,6 @@ class SAC(AlgoBase):
         gamma: float = 0.99,
         tau: float = 0.005,
         n_critics: int = 2,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         target_reduction_type: str = "min",
         update_actor_interval: int = 1,
         initial_temperature: float = 1.0,
@@ -160,6 +162,7 @@ class SAC(AlgoBase):
             scaler=scaler,
             action_scaler=action_scaler,
             generator=generator,
+            kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
         self._critic_learning_rate = critic_learning_rate
@@ -171,9 +174,7 @@ class SAC(AlgoBase):
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
         self._tau = tau
-        self._bootstrap = bootstrap
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
         self._initial_temperature = initial_temperature
@@ -181,7 +182,7 @@ class SAC(AlgoBase):
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = SACImpl(
@@ -199,8 +200,6 @@ class SAC(AlgoBase):
             gamma=self._gamma,
             tau=self._tau,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             target_reduction_type=self._target_reduction_type,
             initial_temperature=self._initial_temperature,
             use_gpu=self._use_gpu,
@@ -299,8 +298,6 @@ class DiscreteSAC(AlgoBase):
         n_steps (int): N-step TD calculation.
         gamma (float): discount factor.
         n_critics (int): the number of Q functions for ensemble.
-        bootstrap (bool): flag to bootstrap Q functions.
-        share_encoder (bool): flag to share encoder network.
         initial_temperature (float): initial temperature value.
         use_gpu (bool, int or d3rlpy.gpu.Device):
             flag to use GPU, device ID or device.
@@ -324,9 +321,7 @@ class DiscreteSAC(AlgoBase):
     _actor_encoder_factory: EncoderFactory
     _critic_encoder_factory: EncoderFactory
     _q_func_factory: QFunctionFactory
-    _bootstrap: bool
     _n_critics: int
-    _share_encoder: bool
     _initial_temperature: float
     _target_update_interval: int
     _augmentation: AugmentationPipeline
@@ -350,8 +345,6 @@ class DiscreteSAC(AlgoBase):
         n_steps: int = 1,
         gamma: float = 0.99,
         n_critics: int = 2,
-        bootstrap: bool = False,
-        share_encoder: bool = False,
         initial_temperature: float = 1.0,
         target_update_interval: int = 8000,
         use_gpu: UseGPUArg = False,
@@ -369,6 +362,7 @@ class DiscreteSAC(AlgoBase):
             scaler=scaler,
             action_scaler=None,
             generator=generator,
+            kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
         self._critic_learning_rate = critic_learning_rate
@@ -379,16 +373,14 @@ class DiscreteSAC(AlgoBase):
         self._actor_encoder_factory = check_encoder(actor_encoder_factory)
         self._critic_encoder_factory = check_encoder(critic_encoder_factory)
         self._q_func_factory = check_q_func(q_func_factory)
-        self._bootstrap = bootstrap
         self._n_critics = n_critics
-        self._share_encoder = share_encoder
         self._initial_temperature = initial_temperature
         self._target_update_interval = target_update_interval
         self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
-    def create_impl(
+    def _create_impl(
         self, observation_shape: Sequence[int], action_size: int
     ) -> None:
         self._impl = DiscreteSACImpl(
@@ -405,8 +397,6 @@ class DiscreteSAC(AlgoBase):
             q_func_factory=self._q_func_factory,
             gamma=self._gamma,
             n_critics=self._n_critics,
-            bootstrap=self._bootstrap,
-            share_encoder=self._share_encoder,
             initial_temperature=self._initial_temperature,
             use_gpu=self._use_gpu,
             scaler=self._scaler,

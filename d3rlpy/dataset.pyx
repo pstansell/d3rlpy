@@ -1,17 +1,20 @@
 import copy
 
 import numpy as np
+
 cimport numpy as np
-import h5py
+
 import cython
+import h5py
+
 from cython cimport view
+
 from cython.parallel import prange
-from libc.string cimport memcpy
-from libcpp cimport nullptr
-from libcpp cimport bool
-from libcpp.memory cimport make_shared, shared_ptr
 
 from dataset cimport CTransition
+from libc.string cimport memcpy
+from libcpp cimport bool, nullptr
+from libcpp.memory cimport make_shared, shared_ptr
 
 
 def _safe_size(array):
@@ -526,7 +529,7 @@ class MDPDataset:
             f.flush()
 
     @classmethod
-    def load(cls, fname):
+    def load(cls, fname, create_mask=False, mask_size=1):
         """ Loads dataset from HDF5.
 
         .. code-block:: python
@@ -547,6 +550,8 @@ class MDPDataset:
 
         Args:
             fname (str): file path.
+            create_mask (bool): flag to create bootstrapping masks.
+            mask_size (int): size of bootstrapping masks.
 
         """
         with h5py.File(fname, 'r') as f:
@@ -561,14 +566,6 @@ class MDPDataset:
                 episode_terminals = f['episode_terminals'][()]
             else:
                 episode_terminals = None
-            if 'create_mask' in f:
-                create_mask = f['create_mask'][()]
-            else:
-                create_mask = False
-            if 'mask_size' in f:
-                mask_size = f['mask_size'][()]
-            else:
-                mask_size = 1
 
         dataset = cls(
             observations=observations,

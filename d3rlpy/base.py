@@ -1,39 +1,50 @@
 import copy
 import json
 from abc import ABCMeta, abstractmethod
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Sequence
 from collections import defaultdict
+from typing import (
+    Any,
+    Callable,
+    DefaultDict,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
-import numpy as np
 import gym
+import numpy as np
 from tqdm.auto import tqdm
 
+from .argument_utility import (
+    ActionScalerArg,
+    ScalerArg,
+    UseGPUArg,
+    check_action_scaler,
+    check_scaler,
+)
+from .augmentation import AugmentationPipeline, DrQPipeline, create_augmentation
+from .constants import IMPL_NOT_INITIALIZED_ERROR
+from .context import disable_parallel
+from .dataset import Episode, MDPDataset, Transition, TransitionMiniBatch
+from .decorators import pretty_repr
+from .gpu import Device
+from .iterators import RoundIterator
+from .logger import LOG, D3RLPyLogger
+from .metrics.scorer import NEGATIVE_SCORERS
+from .models.encoders import EncoderFactory, create_encoder_factory
+from .models.optimizers import OptimizerFactory
+from .models.q_functions import QFunctionFactory, create_q_func_factory
+from .online.utility import get_action_size_from_env
 from .preprocessing import (
-    create_scaler,
+    ActionScaler,
     Scaler,
     create_action_scaler,
-    ActionScaler,
+    create_scaler,
 )
-from .augmentation import create_augmentation, AugmentationPipeline
-from .augmentation import DrQPipeline
-from .dataset import Episode, MDPDataset, Transition, TransitionMiniBatch
-from .logger import D3RLPyLogger
-from .metrics.scorer import NEGATIVE_SCORERS
-from .context import disable_parallel
-from .gpu import Device
-from .models.optimizers import OptimizerFactory
-from .models.encoders import EncoderFactory, create_encoder_factory
-from .models.q_functions import QFunctionFactory, create_q_func_factory
-from .argument_utility import (
-    check_scaler,
-    ScalerArg,
-    check_action_scaler,
-    ActionScalerArg,
-    UseGPUArg,
-)
-from .online.utility import get_action_size_from_env
-from .iterators import RoundIterator
-from .constants import IMPL_NOT_INITIALIZED_ERROR
 
 
 class ImplBase(metaclass=ABCMeta):
@@ -113,6 +124,7 @@ def _deseriealize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     return params
 
 
+@pretty_repr
 class LearnableBase:
 
     _batch_size: int
@@ -134,6 +146,7 @@ class LearnableBase:
         gamma: float,
         scaler: ScalerArg,
         action_scaler: ActionScalerArg,
+        kwargs: Dict[str, Any],
     ):
         self._batch_size = batch_size
         self._n_frames = n_frames
@@ -146,6 +159,9 @@ class LearnableBase:
         self._eval_results = defaultdict(list)
         self._loss_history = defaultdict(list)
         self._active_logger = None
+
+        if len(kwargs.keys()) > 0:
+            LOG.warning("Unused arguments are passed.", **kwargs)
 
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
@@ -225,10 +241,10 @@ class LearnableBase:
                     setattr(self, key, val)
                 except AttributeError:
                     # try passing to protected keys
-                    if hasattr(self, "_" + key):
-                        setattr(self, "_" + key, val)
+                    assert hasattr(self, "_" + key), f"{key} does not exist."
+                    setattr(self, "_" + key, val)
             else:
-                assert hasattr(self, "_" + key)
+                assert hasattr(self, "_" + key), f"{key} does not exist."
                 setattr(self, "_" + key, val)
         return self
 
@@ -314,7 +330,7 @@ class LearnableBase:
 
     def fit(
         self,
-        episodes: List[Episode],
+        dataset: Union[List[Episode], MDPDataset],
         n_epochs: int = 1000,
         save_metrics: bool = True,
         experiment_name: Optional[str] = None,
@@ -322,14 +338,14 @@ class LearnableBase:
         logdir: str = "d3rlpy_logs",
         verbose: bool = True,
         show_progress: bool = True,
-        tensorboard: bool = True,
+        tensorboard_dir: Optional[str] = None,
         eval_episodes: Optional[List[Episode]] = None,
         save_interval: int = 1,
         scorers: Optional[
             Dict[str, Callable[[Any, List[Episode]], float]]
         ] = None,
         shuffle: bool = True,
-    ) -> None:
+    ) -> List[Tuple[int, Dict[str, float]]]:
         """Trains with the given dataset.
 
         .. code-block:: python
@@ -337,7 +353,7 @@ class LearnableBase:
             algo.fit(episodes)
 
         Args:
-            episodes: list of episodes to train.
+            dataset: list of episodes to train.
             n_epochs: the number of epochs to train.
             save_metrics: flag to record metrics in files. If False,
                 the log directory is not created and the model parameters are
@@ -349,14 +365,94 @@ class LearnableBase:
             logdir: root directory name to save logs.
             verbose: flag to show logged information on stdout.
             show_progress: flag to show progress bar for iterations.
-            tensorboard: flag to save logged information in tensorboard
-                (additional to the csv data)
+            tensorboard_dir: directory to save logged information in
+                tensorboard (additional to the csv data).  if ``None``, the
+                directory will not be created.
             eval_episodes: list of episodes to test.
             save_interval: interval to save parameters.
             scorers: list of scorer functions used with `eval_episodes`.
             shuffle: flag to shuffle transitions on each epoch.
 
+        Returns:
+            list of result tuples (epoch, metrics) per epoch.
+
         """
+        results = list(
+            self.fitter(
+                dataset,
+                n_epochs,
+                save_metrics,
+                experiment_name,
+                with_timestamp,
+                logdir,
+                verbose,
+                show_progress,
+                tensorboard_dir,
+                eval_episodes,
+                save_interval,
+                scorers,
+                shuffle,
+            )
+        )
+        return results
+
+    def fitter(
+        self,
+        dataset: Union[List[Episode], MDPDataset],
+        n_epochs: int = 1000,
+        save_metrics: bool = True,
+        experiment_name: Optional[str] = None,
+        with_timestamp: bool = True,
+        logdir: str = "d3rlpy_logs",
+        verbose: bool = True,
+        show_progress: bool = True,
+        tensorboard_dir: Optional[str] = None,
+        eval_episodes: Optional[List[Episode]] = None,
+        save_interval: int = 1,
+        scorers: Optional[
+            Dict[str, Callable[[Any, List[Episode]], float]]
+        ] = None,
+        shuffle: bool = True,
+    ) -> Generator[Tuple[int, Dict[str, float]], None, None]:
+        """Iterate over epochs steps to train with the given dataset. At each
+             iteration algo methods and properties can be changed or queried.
+
+        .. code-block:: python
+
+            for epoch, metrics in algo.fitter(episodes):
+                my_plot(metrics)
+                algo.save_model(my_path)
+
+        Args:
+            dataset: list of episodes to train.
+            n_epochs: the number of epochs to train.
+            save_metrics: flag to record metrics in files. If False,
+                the log directory is not created and the model parameters are
+                not saved during training.
+            experiment_name: experiment name for logging. If not passed,
+                the directory name will be `{class name}_{timestamp}`.
+            with_timestamp: flag to add timestamp string to the last of
+                directory name.
+            logdir: root directory name to save logs.
+            verbose: flag to show logged information on stdout.
+            show_progress: flag to show progress bar for iterations.
+            tensorboard_dir: directory to save logged information in
+                tensorboard (additional to the csv data).  if ``None``, the
+                directory will not be created.
+            eval_episodes: list of episodes to test.
+            save_interval: interval to save parameters.
+            scorers: list of scorer functions used with `eval_episodes`.
+            shuffle: flag to shuffle transitions on each epoch.
+
+        Returns:
+            iterator yielding current epoch and metrics dict.
+
+        """
+
+        if isinstance(dataset, MDPDataset):
+            episodes = dataset.episodes
+        else:
+            episodes = dataset
 
         iterator = RoundIterator(
             episodes,
@@ -374,7 +470,7 @@ class LearnableBase:
             with_timestamp,
             logdir,
             verbose,
-            tensorboard,
+            tensorboard_dir,
         )
 
         # add reference to active logger to algo class during fit
@@ -382,12 +478,12 @@ class LearnableBase:
 
         # initialize scaler
         if self._scaler:
-            logger.debug("Fitting scaler...", scaler=self._scaler.get_type())
+            LOG.debug("Fitting scaler...", scaler=self._scaler.get_type())
             self._scaler.fit(episodes)
 
         # initialize action scaler
         if self._action_scaler:
-            logger.debug(
+            LOG.debug(
                 "Fitting action scaler...",
                 action_scaler=self._action_scaler.get_type(),
             )
@@ -395,14 +491,14 @@ class LearnableBase:
 
         # instantiate implementation
         if self._impl is None:
-            logger.debug("Building model...")
+            LOG.debug("Building model...")
             transition = iterator.transitions[0]
             action_size = transition.get_action_size()
             observation_shape = tuple(transition.get_observation_shape())
             self.create_impl(
                 self._process_observation_shape(observation_shape), action_size
             )
-            logger.debug("Model has been built.")
+            LOG.debug("Model has been built.")
 
         # save hyperparameters
         self.save_params(logger)
@@ -469,11 +565,13 @@ class LearnableBase:
                 self._evaluate(eval_episodes, scorers, logger)
 
             # save metrics
-            logger.commit(epoch, total_step)
+            metrics = logger.commit(epoch, total_step)
 
             # save model parameters
             if epoch % save_interval == 0:
                 logger.save_model(epoch, self)
+
+            yield epoch, metrics
 
         # drop reference to active logger since out of fit there is no active
         # logger
@@ -491,6 +589,13 @@ class LearnableBase:
             action_size: dimension of action-space.
 
         """
+        if self._impl:
+            LOG.warn("Parameters will be reinitialized.")
+        self._create_impl(observation_shape, action_size)
+
+    def _create_impl(
+        self, observation_shape: Sequence[int], action_size: int
+    ) -> None:
         raise NotImplementedError
 
     def build_with_dataset(self, dataset: MDPDataset) -> None:
@@ -571,7 +676,7 @@ class LearnableBase:
         with_timestamp: bool,
         logdir: str,
         verbose: bool,
-        tensorboard: bool,
+        tensorboard_dir: Optional[str],
     ) -> D3RLPyLogger:
         if experiment_name is None:
             experiment_name = self.__class__.__name__
@@ -581,7 +686,7 @@ class LearnableBase:
             save_metrics=save_metrics,
             root_dir=logdir,
             verbose=verbose,
-            tensorboard=tensorboard,
+            tensorboard_dir=tensorboard_dir,
             with_timestamp=with_timestamp,
         )
 

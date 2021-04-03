@@ -5,19 +5,19 @@ import numpy as np
 import torch
 from torch.optim import Optimizer
 
+from ...augmentation import AugmentationPipeline
+from ...gpu import Device
+from ...models.builders import create_parameter, create_probablistic_regressor
+from ...models.encoders import EncoderFactory
+from ...models.optimizers import OptimizerFactory
+from ...models.q_functions import QFunctionFactory
 from ...models.torch import (
-    ProbablisticRegressor,
     Parameter,
+    ProbablisticRegressor,
     compute_max_with_n_actions_and_indices,
 )
-from ...models.builders import create_probablistic_regressor, create_parameter
-from ...models.optimizers import OptimizerFactory
-from ...models.encoders import EncoderFactory
-from ...models.q_functions import QFunctionFactory
-from ...gpu import Device
-from ...preprocessing import Scaler, ActionScaler
-from ...augmentation import AugmentationPipeline
-from ...torch_utility import torch_api, train_api, augmentation_api
+from ...preprocessing import ActionScaler, Scaler
+from ...torch_utility import augmentation_api, torch_api, train_api
 from .sac_impl import SACImpl
 
 
@@ -74,8 +74,6 @@ class BEARImpl(SACImpl):
         gamma: float,
         tau: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         initial_temperature: float,
         initial_alpha: float,
         alpha_threshold: float,
@@ -103,8 +101,6 @@ class BEARImpl(SACImpl):
             gamma=gamma,
             tau=tau,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type="mix",
             initial_temperature=initial_temperature,
             use_gpu=use_gpu,

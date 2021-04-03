@@ -1,11 +1,10 @@
-import pytest
 import gym
+import pytest
 
 from d3rlpy.algos import DQN, SAC
-from d3rlpy.envs import AsyncBatchEnv
-from d3rlpy.online.buffers import ReplayBuffer, BatchReplayBuffer
+from d3rlpy.envs import AsyncBatchEnv, ChannelFirst
+from d3rlpy.online.buffers import BatchReplayBuffer, ReplayBuffer
 from d3rlpy.online.explorers import LinearDecayEpsilonGreedy
-from d3rlpy.envs import ChannelFirst
 
 
 def test_fit_online_cartpole_with_dqn():
@@ -25,7 +24,6 @@ def test_fit_online_cartpole_with_dqn():
         n_steps=100,
         eval_env=eval_env,
         logdir="test_data",
-        tensorboard=False,
     )
 
 
@@ -48,7 +46,6 @@ def test_fit_online_atari_with_dqn():
         n_steps=100,
         eval_env=eval_env,
         logdir="test_data",
-        tensorboard=False,
     )
 
     assert algo.impl.observation_shape == (4, 84, 84)
@@ -68,7 +65,6 @@ def test_fit_online_pendulum_with_sac():
         n_steps=500,
         eval_env=eval_env,
         logdir="test_data",
-        tensorboard=False,
     )
 
 
@@ -85,7 +81,6 @@ def test_timelimit_aware(timelimit_aware):
         buffer,
         n_steps=500,
         logdir="test_data",
-        tensorboard=False,
         timelimit_aware=timelimit_aware,
     )
 
@@ -119,7 +114,6 @@ def test_fit_batch_online_cartpole_with_dqn():
         n_updates_per_epoch=1,
         eval_env=eval_env,
         logdir="test_data",
-        tensorboard=False,
     )
 
 
@@ -146,7 +140,6 @@ def test_fit_batch_online_atari_with_dqn():
         n_updates_per_epoch=1,
         eval_env=eval_env,
         logdir="test_data",
-        tensorboard=False,
     )
 
     assert algo.impl.observation_shape == (4, 84, 84)
@@ -169,5 +162,4 @@ def test_fit_batch_online_pendulum_with_sac():
         n_updates_per_epoch=1,
         eval_env=eval_env,
         logdir="test_data",
-        tensorboard=False,
     )

@@ -2,12 +2,12 @@ from typing import Optional, Sequence
 
 import torch
 
-from ...models.optimizers import OptimizerFactory
-from ...models.encoders import EncoderFactory
-from ...models.q_functions import QFunctionFactory
-from ...gpu import Device
-from ...preprocessing import Scaler, ActionScaler
 from ...augmentation import AugmentationPipeline
+from ...gpu import Device
+from ...models.encoders import EncoderFactory
+from ...models.optimizers import OptimizerFactory
+from ...models.q_functions import QFunctionFactory
+from ...preprocessing import ActionScaler, Scaler
 from ...torch_utility import augmentation_api
 from .ddpg_impl import DDPGImpl
 
@@ -31,8 +31,6 @@ class TD3Impl(DDPGImpl):
         gamma: float,
         tau: float,
         n_critics: int,
-        bootstrap: bool,
-        share_encoder: bool,
         target_reduction_type: str,
         target_smoothing_sigma: float,
         target_smoothing_clip: float,
@@ -54,8 +52,6 @@ class TD3Impl(DDPGImpl):
             gamma=gamma,
             tau=tau,
             n_critics=n_critics,
-            bootstrap=bootstrap,
-            share_encoder=share_encoder,
             target_reduction_type=target_reduction_type,
             use_gpu=use_gpu,
             scaler=scaler,

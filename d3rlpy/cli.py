@@ -1,20 +1,19 @@
 # pylint: disable=redefined-builtin,exec-used
 
-import os
-import json
 import glob
-from typing import Any, Dict, List, TYPE_CHECKING, Optional, Sequence, Tuple
+import json
+import os
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
-import numpy as np
 import click
 import gym
+import numpy as np
 from scipy.ndimage.filters import uniform_filter1d
 
 from . import algos
 from ._version import __version__
 from .envs import Monitor
 from .metrics.scorer import evaluate_on_environment
-
 
 if TYPE_CHECKING:
     import matplotlib.pyplot
@@ -65,6 +64,7 @@ def stats(path: str) -> None:
 @click.option("--xlim", nargs=2, type=float, help="limit on x-axis (tuple).")
 @click.option("--ylim", nargs=2, type=float, help="limit on y-axis (tuple).")
 @click.option("--title", help="title of the plot.")
+@click.option("--ylabel", default="value", help="label on y-axis.")
 def plot(
     path: List[str],
     window: int,
@@ -74,6 +74,7 @@ def plot(
     xlim: Optional[Tuple[float, float]],
     ylim: Optional[Tuple[float, float]],
     title: Optional[str],
+    ylabel: str,
 ) -> None:
     plt = get_plt()
 
@@ -124,7 +125,7 @@ def plot(
         )
 
     plt.xlabel("steps" if show_steps else "epochs")
-    plt.ylabel("value")
+    plt.ylabel(ylabel)
 
     if xlim:
         plt.xlim(xlim[0], xlim[1])

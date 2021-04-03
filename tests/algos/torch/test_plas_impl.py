@@ -2,13 +2,13 @@ import pytest
 
 from d3rlpy.algos.torch.plas_impl import PLASImpl, PLASWithPerturbationImpl
 from d3rlpy.augmentation import DrQPipeline
-from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.encoders import DefaultEncoderFactory
+from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.q_functions import create_q_func_factory
 from tests.algos.algo_test import (
-    torch_impl_tester,
-    DummyScaler,
     DummyActionScaler,
+    DummyScaler,
+    torch_impl_tester,
 )
 
 
@@ -25,8 +25,6 @@ from tests.algos.algo_test import (
 @pytest.mark.parametrize("gamma", [0.99])
 @pytest.mark.parametrize("tau", [0.05])
 @pytest.mark.parametrize("n_critics", [2])
-@pytest.mark.parametrize("bootstrap", [False])
-@pytest.mark.parametrize("share_encoder", [False])
 @pytest.mark.parametrize("target_reduction_type", ["min"])
 @pytest.mark.parametrize("lam", [0.75])
 @pytest.mark.parametrize("beta", [0.5])
@@ -47,8 +45,6 @@ def test_plas_impl(
     gamma,
     tau,
     n_critics,
-    bootstrap,
-    share_encoder,
     target_reduction_type,
     lam,
     beta,
@@ -57,27 +53,25 @@ def test_plas_impl(
     augmentation,
 ):
     impl = PLASImpl(
-        observation_shape,
-        action_size,
-        actor_learning_rate,
-        critic_learning_rate,
-        imitator_learning_rate,
-        actor_optim_factory,
-        critic_optim_factory,
-        imitator_optim_factory,
-        encoder_factory,
-        encoder_factory,
-        encoder_factory,
-        create_q_func_factory(q_func_factory),
-        gamma,
-        tau,
-        n_critics,
-        bootstrap,
-        share_encoder,
-        target_reduction_type,
-        lam,
-        beta,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        actor_learning_rate=actor_learning_rate,
+        critic_learning_rate=critic_learning_rate,
+        imitator_learning_rate=imitator_learning_rate,
+        actor_optim_factory=actor_optim_factory,
+        critic_optim_factory=critic_optim_factory,
+        imitator_optim_factory=imitator_optim_factory,
+        actor_encoder_factory=encoder_factory,
+        critic_encoder_factory=encoder_factory,
+        imitator_encoder_factory=encoder_factory,
+        q_func_factory=create_q_func_factory(q_func_factory),
+        gamma=gamma,
+        tau=tau,
+        n_critics=n_critics,
+        target_reduction_type=target_reduction_type,
+        lam=lam,
+        beta=beta,
+        use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
         augmentation=augmentation,
@@ -100,8 +94,6 @@ def test_plas_impl(
 @pytest.mark.parametrize("gamma", [0.99])
 @pytest.mark.parametrize("tau", [0.05])
 @pytest.mark.parametrize("n_critics", [2])
-@pytest.mark.parametrize("bootstrap", [False])
-@pytest.mark.parametrize("share_encoder", [False])
 @pytest.mark.parametrize("target_reduction_type", ["min"])
 @pytest.mark.parametrize("lam", [0.75])
 @pytest.mark.parametrize("beta", [0.5])
@@ -123,8 +115,6 @@ def test_plas_with_perturbation_impl(
     gamma,
     tau,
     n_critics,
-    bootstrap,
-    share_encoder,
     target_reduction_type,
     lam,
     beta,
@@ -134,28 +124,26 @@ def test_plas_with_perturbation_impl(
     augmentation,
 ):
     impl = PLASWithPerturbationImpl(
-        observation_shape,
-        action_size,
-        actor_learning_rate,
-        critic_learning_rate,
-        imitator_learning_rate,
-        actor_optim_factory,
-        critic_optim_factory,
-        imitator_optim_factory,
-        encoder_factory,
-        encoder_factory,
-        encoder_factory,
-        create_q_func_factory(q_func_factory),
-        gamma,
-        tau,
-        n_critics,
-        bootstrap,
-        share_encoder,
-        target_reduction_type,
-        lam,
-        beta,
-        action_flexibility,
-        use_gpu=False,
+        observation_shape=observation_shape,
+        action_size=action_size,
+        actor_learning_rate=actor_learning_rate,
+        critic_learning_rate=critic_learning_rate,
+        imitator_learning_rate=imitator_learning_rate,
+        actor_optim_factory=actor_optim_factory,
+        critic_optim_factory=critic_optim_factory,
+        imitator_optim_factory=imitator_optim_factory,
+        actor_encoder_factory=encoder_factory,
+        critic_encoder_factory=encoder_factory,
+        imitator_encoder_factory=encoder_factory,
+        q_func_factory=create_q_func_factory(q_func_factory),
+        gamma=gamma,
+        tau=tau,
+        n_critics=n_critics,
+        target_reduction_type=target_reduction_type,
+        lam=lam,
+        beta=beta,
+        action_flexibility=action_flexibility,
+        use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
         augmentation=augmentation,
