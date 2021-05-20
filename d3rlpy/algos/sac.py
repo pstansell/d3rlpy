@@ -1,25 +1,22 @@
-from typing import Any, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from ..argument_utility import (
     ActionScalerArg,
-    AugmentationArg,
     EncoderArg,
     QFuncArg,
     ScalerArg,
     UseGPUArg,
-    check_augmentation,
     check_encoder,
     check_q_func,
     check_use_gpu,
 )
-from ..augmentation import AugmentationPipeline
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..constants import IMPL_NOT_INITIALIZED_ERROR, ActionSpace
 from ..dataset import TransitionMiniBatch
 from ..gpu import Device
 from ..models.encoders import EncoderFactory
 from ..models.optimizers import AdamFactory, OptimizerFactory
 from ..models.q_functions import QFunctionFactory
-from .base import AlgoBase, DataGenerator
+from .base import AlgoBase
 from .torch.sac_impl import DiscreteSACImpl, SACImpl
 
 
@@ -99,10 +96,6 @@ class SAC(AlgoBase):
             The available options are `['pixel', 'min_max', 'standard']`.
         action_scaler (d3rlpy.preprocessing.ActionScaler or str):
             action preprocessor. The available options are ``['min_max']``.
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.sac_impl.SACImpl): algorithm implementation.
 
     """
@@ -121,7 +114,6 @@ class SAC(AlgoBase):
     _target_reduction_type: str
     _update_actor_interval: int
     _initial_temperature: float
-    _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
     _impl: Optional[SACImpl]
 
@@ -149,8 +141,6 @@ class SAC(AlgoBase):
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
         action_scaler: ActionScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[SACImpl] = None,
         **kwargs: Any
     ):
@@ -161,7 +151,6 @@ class SAC(AlgoBase):
             gamma=gamma,
             scaler=scaler,
             action_scaler=action_scaler,
-            generator=generator,
             kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
@@ -178,7 +167,6 @@ class SAC(AlgoBase):
         self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
         self._initial_temperature = initial_temperature
-        self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
@@ -205,46 +193,36 @@ class SAC(AlgoBase):
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=self._action_scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
 
-        critic_loss = self._impl.update_critic(
-            batch.observations,
-            batch.actions,
-            batch.next_rewards,
-            batch.next_observations,
-            batch.terminals,
-            batch.n_steps,
-            batch.masks,
-        )
+        metrics = {}
+
+        critic_loss = self._impl.update_critic(batch)
+        metrics.update({"critic_loss": critic_loss})
 
         # delayed policy update
         if total_step % self._update_actor_interval == 0:
-            actor_loss = self._impl.update_actor(batch.observations)
+            actor_loss = self._impl.update_actor(batch)
+            metrics.update({"actor_loss": actor_loss})
 
             # lagrangian parameter update for SAC temperature
             if self._temp_learning_rate > 0:
-                temp_loss, temp = self._impl.update_temp(batch.observations)
-            else:
-                temp_loss, temp = None, None
+                temp_loss, temp = self._impl.update_temp(batch)
+                metrics.update({"temp_loss": temp_loss, "temp": temp})
 
             self._impl.update_critic_target()
             self._impl.update_actor_target()
-        else:
-            actor_loss = None
-            temp_loss = None
-            temp = None
 
-        return [critic_loss, actor_loss, temp_loss, temp]
+        return metrics
 
-    def get_loss_labels(self) -> List[str]:
-        return ["critic_loss", "actor_loss", "temp_loss", "temp"]
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.CONTINUOUS
 
 
 class DiscreteSAC(AlgoBase):
@@ -303,10 +281,6 @@ class DiscreteSAC(AlgoBase):
             flag to use GPU, device ID or device.
         scaler (d3rlpy.preprocessing.Scaler or str): preprocessor.
             The available options are `['pixel', 'min_max', 'standard']`
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.sac_impl.DiscreteSACImpl):
             algorithm implementation.
 
@@ -324,7 +298,6 @@ class DiscreteSAC(AlgoBase):
     _n_critics: int
     _initial_temperature: float
     _target_update_interval: int
-    _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
     _impl: Optional[DiscreteSACImpl]
 
@@ -349,8 +322,6 @@ class DiscreteSAC(AlgoBase):
         target_update_interval: int = 8000,
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[DiscreteSACImpl] = None,
         **kwargs: Any
     ):
@@ -361,7 +332,6 @@ class DiscreteSAC(AlgoBase):
             gamma=gamma,
             scaler=scaler,
             action_scaler=None,
-            generator=generator,
             kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
@@ -376,7 +346,6 @@ class DiscreteSAC(AlgoBase):
         self._n_critics = n_critics
         self._initial_temperature = initial_temperature
         self._target_update_interval = target_update_interval
-        self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
@@ -400,37 +369,31 @@ class DiscreteSAC(AlgoBase):
             initial_temperature=self._initial_temperature,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
 
-        critic_loss = self._impl.update_critic(
-            batch.observations,
-            batch.actions,
-            batch.next_rewards,
-            batch.next_observations,
-            batch.terminals,
-            batch.n_steps,
-            batch.masks,
-        )
+        metrics = {}
 
-        actor_loss = self._impl.update_actor(batch.observations)
+        critic_loss = self._impl.update_critic(batch)
+        metrics.update({"critic_loss": critic_loss})
+
+        actor_loss = self._impl.update_actor(batch)
+        metrics.update({"actor_loss": actor_loss})
 
         # lagrangian parameter update for SAC temeprature
         if self._temp_learning_rate > 0:
-            temp_loss, temp = self._impl.update_temp(batch.observations)
-        else:
-            temp_loss, temp = None, None
+            temp_loss, temp = self._impl.update_temp(batch)
+            metrics.update({"temp_loss": temp_loss, "temp": temp})
 
         if total_step % self._target_update_interval == 0:
             self._impl.update_target()
 
-        return [critic_loss, actor_loss, temp_loss, temp]
+        return metrics
 
-    def get_loss_labels(self) -> List[str]:
-        return ["critic_loss", "actor_loss", "temp_loss", "temp"]
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.DISCRETE

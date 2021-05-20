@@ -2,13 +2,12 @@ from typing import Optional, Sequence
 
 import torch
 
-from ...augmentation import AugmentationPipeline
 from ...gpu import Device
 from ...models.encoders import EncoderFactory
 from ...models.optimizers import OptimizerFactory
 from ...models.q_functions import QFunctionFactory
 from ...preprocessing import ActionScaler, Scaler
-from ...torch_utility import augmentation_api
+from ...torch_utility import TorchMiniBatch
 from .ddpg_impl import DDPGImpl
 
 
@@ -37,7 +36,6 @@ class TD3Impl(DDPGImpl):
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
         action_scaler: Optional[ActionScaler],
-        augmentation: AugmentationPipeline,
     ):
         super().__init__(
             observation_shape=observation_shape,
@@ -56,19 +54,17 @@ class TD3Impl(DDPGImpl):
             use_gpu=use_gpu,
             scaler=scaler,
             action_scaler=action_scaler,
-            augmentation=augmentation,
         )
         self._target_smoothing_sigma = target_smoothing_sigma
         self._target_smoothing_clip = target_smoothing_clip
 
-    @augmentation_api(targets=["x"])
-    def compute_target(self, x: torch.Tensor) -> torch.Tensor:
+    def compute_target(self, batch: TorchMiniBatch) -> torch.Tensor:
         assert self._targ_policy is not None
         assert self._targ_q_func is not None
         with torch.no_grad():
-            action = self._targ_policy(x)
+            action = self._targ_policy(batch.next_observations)
             # smoothing target
-            noise = torch.randn(action.shape, device=x.device)
+            noise = torch.randn(action.shape, device=batch.device)
             scaled_noise = self._target_smoothing_sigma * noise
             clipped_noise = scaled_noise.clamp(
                 -self._target_smoothing_clip, self._target_smoothing_clip
@@ -76,5 +72,7 @@ class TD3Impl(DDPGImpl):
             smoothed_action = action + clipped_noise
             clipped_action = smoothed_action.clamp(-1.0, 1.0)
             return self._targ_q_func.compute_target(
-                x, clipped_action, reduction=self._target_reduction_type
+                batch.next_observations,
+                clipped_action,
+                reduction=self._target_reduction_type,
             )

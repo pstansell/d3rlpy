@@ -1,24 +1,21 @@
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 
 from ..argument_utility import (
     ActionScalerArg,
-    AugmentationArg,
     EncoderArg,
     ScalerArg,
     UseGPUArg,
-    check_augmentation,
     check_encoder,
     check_use_gpu,
 )
-from ..augmentation import AugmentationPipeline
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..constants import IMPL_NOT_INITIALIZED_ERROR, ActionSpace
 from ..dataset import TransitionMiniBatch
 from ..gpu import Device
 from ..models.encoders import EncoderFactory
 from ..models.optimizers import AdamFactory, OptimizerFactory
-from .base import AlgoBase, DataGenerator
+from .base import AlgoBase
 from .torch.bc_impl import BCBaseImpl, BCImpl, DiscreteBCImpl
 
 
@@ -26,7 +23,6 @@ class _BCBase(AlgoBase):
     _learning_rate: float
     _optim_factory: OptimizerFactory
     _encoder_factory: EncoderFactory
-    _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
     _impl: Optional[BCBaseImpl]
 
@@ -41,8 +37,6 @@ class _BCBase(AlgoBase):
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
         action_scaler: ActionScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[BCBaseImpl] = None,
         **kwargs: Any
     ):
@@ -53,22 +47,20 @@ class _BCBase(AlgoBase):
             gamma=1.0,
             scaler=scaler,
             action_scaler=action_scaler,
-            generator=generator,
             kwargs=kwargs,
         )
         self._learning_rate = learning_rate
         self._optim_factory = optim_factory
         self._encoder_factory = check_encoder(encoder_factory)
-        self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
         loss = self._impl.update_imitator(batch.observations, batch.actions)
-        return [loss]
+        return {"loss": loss}
 
     def predict_value(
         self,
@@ -82,9 +74,6 @@ class _BCBase(AlgoBase):
     def sample_action(self, x: Union[np.ndarray, List[Any]]) -> None:
         """sampling action is not supported by BC algorithm."""
         raise NotImplementedError("BC does not support sampling action.")
-
-    def get_loss_labels(self) -> List[str]:
-        return ["loss"]
 
 
 class BC(_BCBase):
@@ -115,10 +104,6 @@ class BC(_BCBase):
             The available options are `['pixel', 'min_max', 'standard']`.
         action_scaler (d3rlpy.preprocessing.ActionScaler or str):
             action scaler. The available options are ``['min_max']``.
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.bc_impl.BCImpl):
             implemenation of the algorithm.
 
@@ -138,9 +123,11 @@ class BC(_BCBase):
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=self._action_scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
+
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.CONTINUOUS
 
 
 class DiscreteBC(_BCBase):
@@ -172,10 +159,6 @@ class DiscreteBC(_BCBase):
             flag to use GPU, device ID or device.
         scaler (d3rlpy.preprocessing.Scaler or str): preprocessor.
             The available options are `['pixel', 'min_max', 'standard']`
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.bc_impl.DiscreteBCImpl):
             implemenation of the algorithm.
 
@@ -195,8 +178,6 @@ class DiscreteBC(_BCBase):
         beta: float = 0.5,
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[DiscreteBCImpl] = None,
         **kwargs: Any
     ):
@@ -208,8 +189,6 @@ class DiscreteBC(_BCBase):
             n_frames=n_frames,
             use_gpu=use_gpu,
             scaler=scaler,
-            augmentation=augmentation,
-            generator=generator,
             impl=impl,
             **kwargs,
         )
@@ -227,6 +206,8 @@ class DiscreteBC(_BCBase):
             beta=self._beta,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
+
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.DISCRETE

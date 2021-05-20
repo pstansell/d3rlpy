@@ -41,7 +41,7 @@ Documentation: https://d3rlpy.readthedocs.io
 
 ### :rocket: Beyond State-Of-The-Art
 - **distributional Q function**: d3rlpy is the first library that supports distributional Q functions in the all algorithms. The distributional Q function is known as the very powerful method to achieve the state-of-the-performance.
-- **many tweek options**: d3rlpy is also the first to support N-step TD backup, ensemble value functions and data augmentation in the all algorithms, which lead you to the place no one ever reached yet.
+- **many tweek options**: d3rlpy is also the first to support N-step TD backup and ensemble value functions in the all algorithms, which lead you to the place no one ever reached yet.
 
 
 ## installation
@@ -67,14 +67,6 @@ $ conda install -c conda-forge d3rlpy
 $ docker run -it --gpus all --name d3rlpy takuseno/d3rlpy:latest bash
 ```
 
-### build from source (please try this if `core dumped` error occurs)
-```
-$ git clone https://github.com/takuseno/d3rlpy
-$ cd d3rlpy
-$ pip install Cython numpy # if not installed yet
-$ pip install -e .
-```
-
 ## supported algorithms
 | algorithm | discrete control | continuous control | offline RL? |
 |:-|:-:|:-:|:-:|
@@ -91,6 +83,8 @@ $ pip install -e .
 | [Advantage Weighted Actor-Critic (AWAC)](https://arxiv.org/abs/2006.09359) | :no_entry: | :white_check_mark: | :white_check_mark: |
 | [Critic Reguralized Regression (CRR)](https://arxiv.org/abs/2006.15134) | :no_entry: | :white_check_mark: | :white_check_mark: |
 | [Policy in Latent Action Space (PLAS)](https://arxiv.org/abs/2011.07213) | :no_entry: | :white_check_mark: | :white_check_mark: |
+| [Model-based Offline Policy Optimization (MOPO)](https://arxiv.org/abs/2005.13239) | :no_entry: | :white_check_mark: | :white_check_mark: |
+| [Conservative Offline Model-Based Policy Optimization (COMBO)](https://arxiv.org/abs/2102.08363) | :no_entry: | :white_check_mark: | :white_check_mark: |
 
 ## supported Q functions
 - [x] standard Q function
@@ -104,7 +98,6 @@ Basically, all features are available with every algorithm.
 - [x] evaluation metrics in a scikit-learn scorer function style
 - [x] export greedy-policy as TorchScript or ONNX
 - [x] parallel cross validation with multiple GPU
-- [x] [model-based algorithm](https://arxiv.org/abs/2005.13239)
 
 ## examples
 ### MuJoCo

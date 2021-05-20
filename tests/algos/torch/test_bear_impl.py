@@ -2,7 +2,6 @@ import pytest
 import torch
 
 from d3rlpy.algos.torch.bear_impl import BEARImpl
-from d3rlpy.augmentation import DrQPipeline
 from d3rlpy.models.encoders import DefaultEncoderFactory
 from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.q_functions import create_q_func_factory
@@ -34,12 +33,13 @@ from tests.algos.algo_test import (
 @pytest.mark.parametrize("initial_alpha", [1.0])
 @pytest.mark.parametrize("alpha_threshold", [0.05])
 @pytest.mark.parametrize("lam", [0.75])
-@pytest.mark.parametrize("n_action_samples", [4])
+@pytest.mark.parametrize("n_action_samples", [100])
+@pytest.mark.parametrize("n_target_samples", [10])
 @pytest.mark.parametrize("mmd_kernel", ["laplacian"])
 @pytest.mark.parametrize("mmd_sigma", [20.0])
+@pytest.mark.parametrize("vae_kl_weight", [0.5])
 @pytest.mark.parametrize("scaler", [None, DummyScaler()])
 @pytest.mark.parametrize("action_scaler", [None, DummyActionScaler()])
-@pytest.mark.parametrize("augmentation", [DrQPipeline()])
 def test_bear_impl(
     observation_shape,
     action_size,
@@ -63,11 +63,12 @@ def test_bear_impl(
     alpha_threshold,
     lam,
     n_action_samples,
+    n_target_samples,
     mmd_kernel,
     mmd_sigma,
+    vae_kl_weight,
     scaler,
     action_scaler,
-    augmentation,
 ):
     impl = BEARImpl(
         observation_shape=observation_shape,
@@ -94,22 +95,15 @@ def test_bear_impl(
         alpha_threshold=alpha_threshold,
         lam=lam,
         n_action_samples=n_action_samples,
+        n_target_samples=n_target_samples,
         mmd_kernel=mmd_kernel,
         mmd_sigma=mmd_sigma,
+        vae_kl_weight=vae_kl_weight,
         use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
-        augmentation=augmentation,
     )
     impl.build()
-
-    x = torch.rand(32, *observation_shape)
-    target = impl.compute_target(x)
-    if q_func_factory == "mean":
-        assert target.shape == (32, 1)
-    else:
-        n_quantiles = impl._q_func.q_funcs[0]._n_quantiles
-        assert target.shape == (32, n_quantiles)
 
     torch_impl_tester(
         impl, discrete=False, deterministic_best_action=q_func_factory != "iqn"

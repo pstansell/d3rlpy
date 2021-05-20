@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 
@@ -13,7 +13,11 @@ from ..argument_utility import (
     check_q_func,
     check_use_gpu,
 )
-from ..constants import ALGO_NOT_GIVEN_ERROR, IMPL_NOT_INITIALIZED_ERROR
+from ..constants import (
+    ALGO_NOT_GIVEN_ERROR,
+    IMPL_NOT_INITIALIZED_ERROR,
+    ActionSpace,
+)
 from ..dataset import TransitionMiniBatch
 from ..gpu import Device
 from ..models.encoders import EncoderFactory
@@ -61,7 +65,6 @@ class _FQEBase(AlgoBase):
             gamma=gamma,
             scaler=scaler,
             action_scaler=action_scaler,
-            generator=None,
             kwargs=kwargs,
         )
         self._algo = algo
@@ -88,25 +91,14 @@ class _FQEBase(AlgoBase):
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._algo is not None, ALGO_NOT_GIVEN_ERROR
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
         next_actions = self._algo.predict(batch.observations)
-        loss = self._impl.update(
-            batch.observations,
-            batch.actions,
-            batch.next_rewards,
-            next_actions,
-            batch.next_observations,
-            batch.terminals,
-            batch.n_steps,
-        )
+        loss = self._impl.update(batch, next_actions)
         if total_step % self._target_update_interval == 0:
             self._impl.update_target()
-        return [loss]
-
-    def get_loss_labels(self) -> List[str]:
-        return ["value_loss"]
+        return {"loss": loss}
 
 
 class FQE(_FQEBase):
@@ -173,6 +165,9 @@ class FQE(_FQEBase):
         )
         self._impl.build()
 
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.CONTINUOUS
+
 
 class DiscreteFQE(_FQEBase):
     r"""Fitted Q Evaluation for discrete action-space.
@@ -212,8 +207,6 @@ class DiscreteFQE(_FQEBase):
             flag to use GPU, device ID or device.
         scaler (d3rlpy.preprocessing.Scaler or str): preprocessor.
             The available options are `['pixel', 'min_max', 'standard']`
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
         impl (d3rlpy.metrics.ope.torch.FQEImpl): algorithm implementation.
 
     """
@@ -237,3 +230,6 @@ class DiscreteFQE(_FQEBase):
             action_scaler=None,
         )
         self._impl.build()
+
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.DISCRETE

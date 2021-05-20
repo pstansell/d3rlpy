@@ -1,4 +1,4 @@
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import gym
 import numpy as np
@@ -15,10 +15,10 @@ from .buffers import BatchBuffer, Buffer
 from .explorers import Explorer
 
 
-class _AlgoProtocol(Protocol):
+class AlgoProtocol(Protocol):
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         ...
 
     def build_with_env(self, env: gym.Env) -> None:
@@ -31,9 +31,6 @@ class _AlgoProtocol(Protocol):
         ...
 
     def sample_action(self, x: Union[np.ndarray, List[Any]]) -> np.ndarray:
-        ...
-
-    def get_loss_labels(self) -> List[str]:
         ...
 
     def save_model(self, fname: str) -> None:
@@ -72,7 +69,7 @@ class _AlgoProtocol(Protocol):
         ...
 
 
-def _setup_algo(algo: _AlgoProtocol, env: gym.Env) -> None:
+def _setup_algo(algo: AlgoProtocol, env: gym.Env) -> None:
     # initialize scaler
     if algo.scaler:
         LOG.debug("Fitting scaler...", scler=algo.scaler.get_type())
@@ -94,7 +91,7 @@ def _setup_algo(algo: _AlgoProtocol, env: gym.Env) -> None:
 
 
 def train_single_env(
-    algo: _AlgoProtocol,
+    algo: AlgoProtocol,
     env: gym.Env,
     buffer: Buffer,
     explorer: Optional[Explorer] = None,
@@ -113,6 +110,7 @@ def train_single_env(
     show_progress: bool = True,
     tensorboard_dir: Optional[str] = None,
     timelimit_aware: bool = True,
+    callback: Optional[Callable[[AlgoProtocol, int, int], None]] = None,
 ) -> None:
     """Start training loop of online deep reinforcement learning.
 
@@ -143,6 +141,8 @@ def train_single_env(
         timelimit_aware: flag to turn ``terminal`` flag ``False`` when
             ``TimeLimit.truncated`` flag is ``True``, which is designed to
             incorporate with ``gym.wrappers.TimeLimit``.
+        callback: callable function that takes ``(algo, epoch, total_step)``
+                , which is called at the end of epochs.
 
     """
     # setup logger
@@ -252,9 +252,8 @@ def train_single_env(
                         )
 
                     # record metrics
-                    for name, val in zip(algo.get_loss_labels(), loss):
-                        if val:
-                            logger.add_metric(name, val)
+                    for name, val in loss.items():
+                        logger.add_metric(name, val)
 
         if epoch > 0 and total_step % n_steps_per_epoch == 0:
             # evaluation
@@ -264,12 +263,16 @@ def train_single_env(
             if epoch % save_interval == 0:
                 logger.save_model(total_step, algo)
 
+            # call callback if given
+            if callback:
+                callback(algo, epoch, total_step)
+
             # save metrics
             logger.commit(epoch, total_step)
 
 
 def train_batch_env(
-    algo: _AlgoProtocol,
+    algo: AlgoProtocol,
     env: BatchEnv,
     buffer: BatchBuffer,
     explorer: Optional[Explorer] = None,
@@ -288,6 +291,7 @@ def train_batch_env(
     show_progress: bool = True,
     tensorboard_dir: Optional[str] = None,
     timelimit_aware: bool = True,
+    callback: Optional[Callable[[AlgoProtocol, int, int], None]] = None,
 ) -> None:
     """Start training loop of online deep reinforcement learning.
 
@@ -318,6 +322,8 @@ def train_batch_env(
         timelimit_aware: flag to turn ``terminal`` flag ``False`` when
             ``TimeLimit.truncated`` flag is ``True``, which is designed to
             incorporate with ``gym.wrappers.TimeLimit``.
+        callback: callable function that takes ``(algo, epoch, total_step)``
+                , which is called at the end of epochs.
 
     """
     # setup logger
@@ -425,14 +431,17 @@ def train_batch_env(
                 )
 
             # record metrics
-            for name, val in zip(algo.get_loss_labels(), loss):
-                if val:
-                    logger.add_metric(name, val)
+            for name, val in loss.items():
+                logger.add_metric(name, val)
 
         if epoch % eval_interval == 0:
             # evaluation
             if eval_scorer:
                 logger.add_metric("evaluation", eval_scorer(algo))
+
+        # call callback if given
+        if callback:
+            callback(algo, epoch, total_step)
 
         # save metrics
         logger.commit(epoch, total_step)
@@ -442,3 +451,84 @@ def train_batch_env(
 
     # finish all process
     env.close()
+
+
+def collect(
+    algo: AlgoProtocol,
+    env: gym.Env,
+    buffer: Buffer,
+    explorer: Optional[Explorer] = None,
+    n_steps: int = 1000000,
+    show_progress: bool = True,
+    timelimit_aware: bool = True,
+) -> None:
+    """Collects data via interaction with environment.
+
+    Args:
+        algo: algorithm object.
+        env: gym-like environment.
+        buffer : replay buffer.
+        explorer: action explorer.
+        n_steps: the number of total steps to train.
+        show_progress: flag to show progress bar for iterations.
+        timelimit_aware: flag to turn ``terminal`` flag ``False`` when
+            ``TimeLimit.truncated`` flag is ``True``, which is designed to
+            incorporate with ``gym.wrappers.TimeLimit``.
+
+    """
+    # initialize algorithm parameters
+    _setup_algo(algo, env)
+
+    observation_shape = env.observation_space.shape
+    is_image = len(observation_shape) == 3
+
+    # prepare stacked observation
+    if is_image:
+        stacked_frame = StackedObservation(observation_shape, algo.n_frames)
+
+    # switch based on show_progress flag
+    xrange = trange if show_progress else range
+
+    # start training loop
+    observation, reward, terminal = env.reset(), 0.0, False
+    clip_episode = False
+    for total_step in xrange(1, n_steps + 1):
+        # stack observation if necessary
+        if is_image:
+            stacked_frame.append(observation)
+            fed_observation = stacked_frame.eval()
+        else:
+            observation = observation.astype("f4")
+            fed_observation = observation
+
+        # sample exploration action
+        if explorer:
+            x = fed_observation.reshape((1,) + fed_observation.shape)
+            action = explorer.sample(algo, x, total_step)[0]
+        else:
+            action = algo.sample_action([fed_observation])[0]
+
+        # store observation
+        buffer.append(
+            observation=observation,
+            action=action,
+            reward=reward,
+            terminal=terminal,
+            clip_episode=clip_episode,
+        )
+
+        # get next observation
+        if clip_episode:
+            observation, reward, terminal = env.reset(), 0.0, False
+            clip_episode = False
+            # for image observation
+            if is_image:
+                stacked_frame.clear()
+        else:
+            observation, reward, terminal, info = env.step(action)
+            # special case for TimeLimit wrapper
+            if timelimit_aware and "TimeLimit.truncated" in info:
+                clip_episode = True
+                terminal = False
+            else:
+                clip_episode = terminal

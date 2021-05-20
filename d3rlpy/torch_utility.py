@@ -1,5 +1,5 @@
 from inspect import signature
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch.utils.data._utils.collate import default_collate
 from typing_extensions import Protocol
 
-from .augmentation import AugmentationPipeline
+from .dataset import TransitionMiniBatch
 from .preprocessing import ActionScaler, Scaler
 
 
@@ -110,6 +110,107 @@ class _WithDeviceAndScalerProtocol(Protocol):
         ...
 
 
+def _convert_to_torch(array: np.ndarray, device: str) -> torch.Tensor:
+    dtype = torch.uint8 if array.dtype == np.uint8 else torch.float32
+    tensor = torch.tensor(data=array, dtype=dtype, device=device)
+    return tensor.float()
+
+
+class TorchMiniBatch:
+
+    _observations: torch.Tensor
+    _actions: torch.Tensor
+    _rewards: torch.Tensor
+    _next_observations: torch.Tensor
+    _next_actions: torch.Tensor
+    _next_rewards: torch.Tensor
+    _terminals: torch.Tensor
+    _masks: Optional[torch.Tensor]
+    _n_steps: torch.Tensor
+    _device: str
+
+    def __init__(
+        self,
+        batch: TransitionMiniBatch,
+        device: str,
+        scaler: Optional[Scaler] = None,
+        action_scaler: Optional[ActionScaler] = None,
+    ):
+        # convert numpy array to torch tensor
+        observations = _convert_to_torch(batch.observations, device)
+        actions = _convert_to_torch(batch.actions, device)
+        rewards = _convert_to_torch(batch.rewards, device)
+        next_observations = _convert_to_torch(batch.next_observations, device)
+        next_actions = _convert_to_torch(batch.next_actions, device)
+        next_rewards = _convert_to_torch(batch.next_rewards, device)
+        terminals = _convert_to_torch(batch.terminals, device)
+        masks: Optional[torch.Tensor]
+        if batch.masks is None:
+            masks = None
+        else:
+            masks = _convert_to_torch(batch.masks, device)
+        n_steps = _convert_to_torch(batch.n_steps, device)
+
+        # apply scaler
+        if scaler:
+            observations = scaler.transform(observations)
+            next_observations = scaler.transform(next_observations)
+        if action_scaler:
+            actions = action_scaler.transform(actions)
+            next_actions = action_scaler.transform(next_actions)
+
+        self._observations = observations
+        self._actions = actions
+        self._rewards = rewards
+        self._next_observations = next_observations
+        self._next_actions = next_actions
+        self._next_rewards = next_rewards
+        self._terminals = terminals
+        self._masks = masks
+        self._n_steps = n_steps
+        self._device = device
+
+    @property
+    def observations(self) -> torch.Tensor:
+        return self._observations
+
+    @property
+    def actions(self) -> torch.Tensor:
+        return self._actions
+
+    @property
+    def rewards(self) -> torch.Tensor:
+        return self._rewards
+
+    @property
+    def next_observations(self) -> torch.Tensor:
+        return self._next_observations
+
+    @property
+    def next_actions(self) -> torch.Tensor:
+        return self._next_actions
+
+    @property
+    def next_rewards(self) -> torch.Tensor:
+        return self._next_rewards
+
+    @property
+    def terminals(self) -> torch.Tensor:
+        return self._terminals
+
+    @property
+    def masks(self) -> Optional[torch.Tensor]:
+        return self._masks
+
+    @property
+    def n_steps(self) -> torch.Tensor:
+        return self._n_steps
+
+    @property
+    def device(self) -> str:
+        return self._device
+
+
 def torch_api(
     scaler_targets: Optional[List[str]] = None,
     action_scaler_targets: Optional[List[str]] = None,
@@ -120,11 +221,13 @@ def torch_api(
         arg_keys = list(sig.parameters.keys())[1:]
 
         def wrapper(
-            self: _WithDeviceAndScalerProtocol, *args: np.ndarray, **kwargs: Any
+            self: _WithDeviceAndScalerProtocol, *args: Any, **kwargs: Any
         ) -> np.ndarray:
+            tensors: List[Union[torch.Tensor, TorchMiniBatch]] = []
+
             # convert all args to torch.Tensor
-            tensors = []
             for i, val in enumerate(args):
+                tensor: Union[torch.Tensor, TorchMiniBatch]
                 if isinstance(val, torch.Tensor):
                     tensor = val
                 elif isinstance(val, list):
@@ -142,6 +245,13 @@ def torch_api(
                     )
                 elif val is None:
                     tensor = None
+                elif isinstance(val, TransitionMiniBatch):
+                    tensor = TorchMiniBatch(
+                        val,
+                        self.device,
+                        scaler=self.scaler,
+                        action_scaler=self.action_scaler,
+                    )
                 else:
                     tensor = torch.tensor(
                         data=val,
@@ -149,19 +259,20 @@ def torch_api(
                         device=self.device,
                     )
 
-                # preprocess
-                if self.scaler and scaler_targets:
-                    if arg_keys[i] in scaler_targets:
-                        tensor = self.scaler.transform(tensor)
+                if isinstance(tensor, torch.Tensor):
+                    # preprocess
+                    if self.scaler and scaler_targets:
+                        if arg_keys[i] in scaler_targets:
+                            tensor = self.scaler.transform(tensor)
 
-                # preprocess action
-                if self.action_scaler and action_scaler_targets:
-                    if arg_keys[i] in action_scaler_targets:
-                        tensor = self.action_scaler.transform(tensor)
+                    # preprocess action
+                    if self.action_scaler and action_scaler_targets:
+                        if arg_keys[i] in action_scaler_targets:
+                            tensor = self.action_scaler.transform(tensor)
 
-                # make sure if the tensor is float32 type
-                if tensor is not None and tensor.dtype != torch.float32:
-                    tensor = tensor.float()
+                    # make sure if the tensor is float32 type
+                    if tensor is not None and tensor.dtype != torch.float32:
+                        tensor = tensor.float()
 
                 tensors.append(tensor)
             return f(self, *tensors, **kwargs)
@@ -169,33 +280,6 @@ def torch_api(
         return wrapper
 
     return _torch_api
-
-
-class _WithAugmentationProtocol(Protocol):
-    @property
-    def augmentation(self) -> AugmentationPipeline:
-        ...
-
-
-def augmentation_api(targets: List[str]) -> Callable[..., torch.Tensor]:
-    def _augmentation_api(
-        f: Callable[..., torch.Tensor]
-    ) -> Callable[..., torch.Tensor]:
-        sig = signature(f)
-        arg_keys = list(sig.parameters.keys())[1:]
-
-        def wrapper(
-            self: _WithAugmentationProtocol, *args: torch.Tensor
-        ) -> torch.Tensor:
-            inputs: Dict[str, torch.Tensor] = {}
-            for key, val in zip(arg_keys, args):
-                inputs[key] = val
-            inputs["self"] = self
-            return self.augmentation.process(f, inputs, targets)
-
-        return wrapper
-
-    return _augmentation_api
 
 
 def eval_api(f: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
@@ -212,3 +296,20 @@ def train_api(f: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
         return f(self, *args, **kwargs)
 
     return wrapper
+
+
+class View(nn.Module):  # type: ignore
+
+    _shape: Sequence[int]
+
+    def __init__(self, shape: Sequence[int]):
+        super().__init__()
+        self._shape = shape
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.view(self._shape)
+
+
+class Swish(nn.Module):  # type: ignore
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * torch.sigmoid(x)

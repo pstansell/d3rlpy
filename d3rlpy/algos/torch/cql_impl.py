@@ -6,7 +6,6 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Optimizer
 
-from ...augmentation import AugmentationPipeline
 from ...gpu import Device
 from ...models.builders import create_parameter
 from ...models.encoders import EncoderFactory
@@ -14,7 +13,7 @@ from ...models.optimizers import OptimizerFactory
 from ...models.q_functions import QFunctionFactory
 from ...models.torch import Parameter
 from ...preprocessing import ActionScaler, Scaler
-from ...torch_utility import augmentation_api, torch_api, train_api
+from ...torch_utility import TorchMiniBatch, torch_api, train_api
 from .dqn_impl import DoubleDQNImpl
 from .sac_impl import SACImpl
 
@@ -25,6 +24,7 @@ class CQLImpl(SACImpl):
     _alpha_optim_factory: OptimizerFactory
     _initial_alpha: float
     _alpha_threshold: float
+    _conservative_weight: float
     _n_action_samples: int
     _soft_q_backup: bool
     _log_alpha: Optional[Parameter]
@@ -52,12 +52,12 @@ class CQLImpl(SACImpl):
         initial_temperature: float,
         initial_alpha: float,
         alpha_threshold: float,
+        conservative_weight: float,
         n_action_samples: int,
         soft_q_backup: bool,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
         action_scaler: Optional[ActionScaler],
-        augmentation: AugmentationPipeline,
     ):
         super().__init__(
             observation_shape=observation_shape,
@@ -79,12 +79,12 @@ class CQLImpl(SACImpl):
             use_gpu=use_gpu,
             scaler=scaler,
             action_scaler=action_scaler,
-            augmentation=augmentation,
         )
         self._alpha_learning_rate = alpha_learning_rate
         self._alpha_optim_factory = alpha_optim_factory
         self._initial_alpha = initial_alpha
         self._alpha_threshold = alpha_threshold
+        self._conservative_weight = conservative_weight
         self._n_action_samples = n_action_samples
         self._soft_q_backup = soft_q_backup
 
@@ -107,27 +107,18 @@ class CQLImpl(SACImpl):
             self._log_alpha.parameters(), lr=self._alpha_learning_rate
         )
 
-    def _compute_critic_loss(
-        self,
-        obs_t: torch.Tensor,
-        act_t: torch.Tensor,
-        rew_tpn: torch.Tensor,
-        q_tpn: torch.Tensor,
-        ter_tpn: torch.Tensor,
-        n_steps: torch.Tensor,
-        masks: Optional[torch.Tensor],
+    def compute_critic_loss(
+        self, batch: TorchMiniBatch, q_tpn: torch.Tensor
     ) -> torch.Tensor:
-        loss = super()._compute_critic_loss(
-            obs_t, act_t, rew_tpn, q_tpn, ter_tpn, n_steps, masks
+        loss = super().compute_critic_loss(batch, q_tpn)
+        conservative_loss = self._compute_conservative_loss(
+            batch.observations, batch.actions, batch.next_observations
         )
-        conservative_loss = self._compute_conservative_loss(obs_t, act_t)
-        return loss + conservative_loss
+        return loss + self._conservative_weight * conservative_loss
 
     @train_api
-    @torch_api(scaler_targets=["obs_t"], action_scaler_targets=["act_t"])
-    def update_alpha(
-        self, obs_t: torch.Tensor, act_t: torch.Tensor
-    ) -> np.ndarray:
+    @torch_api()
+    def update_alpha(self, batch: TorchMiniBatch) -> np.ndarray:
         assert self._alpha_optim is not None
         assert self._q_func is not None
         assert self._log_alpha is not None
@@ -137,7 +128,11 @@ class CQLImpl(SACImpl):
 
         self._alpha_optim.zero_grad()
 
-        loss = -self._compute_conservative_loss(obs_t, act_t)
+        # the original implementation does scale the loss value
+        conservative_loss = -self._compute_conservative_loss(
+            batch.observations, batch.actions, batch.next_observations
+        )
+        loss = self._conservative_weight * conservative_loss
 
         loss.backward()
         self._alpha_optim.step()
@@ -146,99 +141,118 @@ class CQLImpl(SACImpl):
 
         return loss.cpu().detach().numpy(), cur_alpha
 
-    def _compute_conservative_loss(
-        self, obs_t: torch.Tensor, act_t: torch.Tensor
+    def _compute_policy_is_values(
+        self, policy_obs: torch.Tensor, value_obs: torch.Tensor
     ) -> torch.Tensor:
         assert self._policy is not None
         assert self._q_func is not None
-        assert self._log_alpha is not None
         with torch.no_grad():
             policy_actions, n_log_probs = self._policy.sample_n_with_log_prob(
-                obs_t, self._n_action_samples
+                policy_obs, self._n_action_samples
             )
 
-        # policy action for t
-        repeated_obs = obs_t.expand(self._n_action_samples, *obs_t.shape)
+        obs_shape = value_obs.shape
+
+        repeated_obs = value_obs.expand(self._n_action_samples, *obs_shape)
         # (n, batch, observation) -> (batch, n, observation)
         transposed_obs = repeated_obs.transpose(0, 1)
         # (batch, n, observation) -> (batch * n, observation)
-        flat_obs = transposed_obs.reshape(-1, *obs_t.shape[1:])
+        flat_obs = transposed_obs.reshape(-1, *obs_shape[1:])
         # (batch, n, action) -> (batch * n, action)
         flat_policy_acts = policy_actions.reshape(-1, self.action_size)
 
         # estimate action-values for policy actions
         policy_values = self._q_func(flat_obs, flat_policy_acts, "none")
         policy_values = policy_values.view(
-            self._n_critics, obs_t.shape[0], self._n_action_samples
+            self._n_critics, obs_shape[0], self._n_action_samples
         )
         log_probs = n_log_probs.view(1, -1, self._n_action_samples)
 
+        # importance sampling
+        return policy_values - log_probs
+
+    def _compute_random_is_values(self, obs: torch.Tensor) -> torch.Tensor:
+        assert self._q_func is not None
+
+        repeated_obs = obs.expand(self._n_action_samples, *obs.shape)
+        # (n, batch, observation) -> (batch, n, observation)
+        transposed_obs = repeated_obs.transpose(0, 1)
+        # (batch, n, observation) -> (batch * n, observation)
+        flat_obs = transposed_obs.reshape(-1, *obs.shape[1:])
+
         # estimate action-values for actions from uniform distribution
         # uniform distribution between [-1.0, 1.0]
-        random_actions = torch.zeros_like(flat_policy_acts).uniform_(-1.0, 1.0)
+        flat_shape = (obs.shape[0] * self._n_action_samples, self._action_size)
+        zero_tensor = torch.zeros(flat_shape, device=self._device)
+        random_actions = zero_tensor.uniform_(-1.0, 1.0)
         random_values = self._q_func(flat_obs, random_actions, "none")
         random_values = random_values.view(
-            self._n_critics, obs_t.shape[0], self._n_action_samples
+            self._n_critics, obs.shape[0], self._n_action_samples
         )
         random_log_probs = math.log(0.5 ** self._action_size)
 
+        # importance sampling
+        return random_values - random_log_probs
+
+    def _compute_conservative_loss(
+        self, obs_t: torch.Tensor, act_t: torch.Tensor, obs_tp1: torch.Tensor
+    ) -> torch.Tensor:
+        assert self._policy is not None
+        assert self._q_func is not None
+        assert self._log_alpha is not None
+
+        policy_values_t = self._compute_policy_is_values(obs_t, obs_t)
+        policy_values_tp1 = self._compute_policy_is_values(obs_tp1, obs_t)
+        random_values = self._compute_random_is_values(obs_t)
+
         # compute logsumexp
-        # (n critics, batch, 2 * n samples) -> (n critics, batch, 1)
+        # (n critics, batch, 3 * n samples) -> (n critics, batch, 1)
         target_values = torch.cat(
-            [policy_values - log_probs, random_values - random_log_probs], dim=2
+            [policy_values_t, policy_values_tp1, random_values], dim=2
         )
         logsumexp = torch.logsumexp(target_values, dim=2, keepdim=True)
 
         # estimate action-values for data actions
         data_values = self._q_func(obs_t, act_t, "none")
 
-        element_wise_loss = logsumexp - data_values - self._alpha_threshold
+        loss = logsumexp.sum(dim=0).mean() - data_values.sum(dim=0).mean()
 
         # clip for stability
         clipped_alpha = self._log_alpha().exp().clamp(0, 1e6)
 
-        return (clipped_alpha[0][0] * element_wise_loss).sum(dim=0).mean()
+        return clipped_alpha[0][0] * loss - self._alpha_threshold
 
-    @augmentation_api(targets=["x"])
-    def compute_target(self, x: torch.Tensor) -> torch.Tensor:
-        assert self._policy is not None
-        assert self._log_temp is not None
-        assert self._targ_q_func is not None
+    def compute_target(self, batch: TorchMiniBatch) -> torch.Tensor:
+        if self._soft_q_backup:
+            target_value = super().compute_target(batch)
+        else:
+            target_value = self._compute_deterministic_target(batch)
+        return target_value
+
+    def _compute_deterministic_target(
+        self, batch: TorchMiniBatch
+    ) -> torch.Tensor:
+        assert self._policy
+        assert self._targ_q_func
         with torch.no_grad():
-            action, log_prob = self._policy.sample_with_log_prob(x)
-            target_value = self._targ_q_func.compute_target(
-                x, action, reduction=self._target_reduction_type
+            action = self._policy.best_action(batch.next_observations)
+            return self._targ_q_func.compute_target(
+                batch.next_observations,
+                action,
+                reduction=self._target_reduction_type,
             )
-            if self._soft_q_backup:
-                entropy = self._log_temp().exp() * log_prob
-                if self._target_reduction_type == "none":
-                    target_value -= entropy.view(1, -1, 1)
-                else:
-                    target_value -= entropy
-            return target_value
 
 
 class DiscreteCQLImpl(DoubleDQNImpl):
-    def _compute_loss(
+    def compute_loss(
         self,
-        obs_t: torch.Tensor,
-        act_t: torch.Tensor,
-        rew_tpn: torch.Tensor,
+        batch: TorchMiniBatch,
         q_tpn: torch.Tensor,
-        ter_tpn: torch.Tensor,
-        n_steps: torch.Tensor,
-        masks: torch.Tensor,
     ) -> torch.Tensor:
-        loss = super()._compute_loss(
-            obs_t,
-            act_t,
-            rew_tpn,
-            q_tpn,
-            ter_tpn,
-            n_steps,
-            masks,
+        loss = super().compute_loss(batch, q_tpn)
+        conservative_loss = self._compute_conservative_loss(
+            batch.observations, batch.actions.long()
         )
-        conservative_loss = self._compute_conservative_loss(obs_t, act_t)
         return loss + conservative_loss
 
     def _compute_conservative_loss(

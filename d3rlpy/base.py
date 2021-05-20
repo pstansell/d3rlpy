@@ -26,13 +26,17 @@ from .argument_utility import (
     check_action_scaler,
     check_scaler,
 )
-from .augmentation import AugmentationPipeline, DrQPipeline, create_augmentation
-from .constants import IMPL_NOT_INITIALIZED_ERROR
+from .constants import (
+    CONTINUOUS_ACTION_SPACE_MISMATCH_ERROR,
+    DISCRETE_ACTION_SPACE_MISMATCH_ERROR,
+    IMPL_NOT_INITIALIZED_ERROR,
+    ActionSpace,
+)
 from .context import disable_parallel
 from .dataset import Episode, MDPDataset, Transition, TransitionMiniBatch
 from .decorators import pretty_repr
 from .gpu import Device
-from .iterators import RoundIterator
+from .iterators import RandomIterator, RoundIterator, TransitionIterator
 from .logger import LOG, D3RLPyLogger
 from .metrics.scorer import NEGATIVE_SCORERS
 from .models.encoders import EncoderFactory, create_encoder_factory
@@ -80,14 +84,6 @@ def _serialize_params(params: Dict[str, Any]) -> Dict[str, Any]:
             }
         elif isinstance(value, OptimizerFactory):
             params[key] = value.get_params()
-        elif isinstance(value, AugmentationPipeline):
-            aug_types = value.get_augmentation_types()
-            aug_params = value.get_augmentation_params()
-            params[key] = {"params": value.get_params(), "augmentations": []}
-            for aug_type, aug_param in zip(aug_types, aug_params):
-                params[key]["augmentations"].append(
-                    {"type": aug_type, "params": aug_param}
-                )
     return params
 
 
@@ -103,14 +99,6 @@ def _deseriealize_params(params: Dict[str, Any]) -> Dict[str, Any]:
             scaler_params = params["action_scaler"]["params"]
             action_scaler = create_action_scaler(scaler_type, **scaler_params)
             params[key] = action_scaler
-        elif key == "augmentation" and params["augmentation"]:
-            augmentations = []
-            for param in params[key]["augmentations"]:
-                aug_type = param["type"]
-                aug_params = param["params"]
-                augmentation = create_augmentation(aug_type, **aug_params)
-                augmentations.append(augmentation)
-            params[key] = DrQPipeline(augmentations, **params[key]["params"])
         elif "optim_factory" in key:
             params[key] = OptimizerFactory(**value)
         elif "encoder_factory" in key:
@@ -133,6 +121,8 @@ class LearnableBase:
     _gamma: float
     _scaler: Optional[Scaler]
     _action_scaler: Optional[ActionScaler]
+    _real_ratio: float
+    _generated_maxlen: int
     _impl: Optional[ImplBase]
     _eval_results: DefaultDict[str, List[float]]
     _loss_history: DefaultDict[str, List[float]]
@@ -146,7 +136,9 @@ class LearnableBase:
         gamma: float,
         scaler: ScalerArg,
         action_scaler: ActionScalerArg,
-        kwargs: Dict[str, Any],
+        real_ratio: float = 1.0,
+        generated_maxlen: int = 100000,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         self._batch_size = batch_size
         self._n_frames = n_frames
@@ -154,13 +146,15 @@ class LearnableBase:
         self._gamma = gamma
         self._scaler = check_scaler(scaler)
         self._action_scaler = check_action_scaler(action_scaler)
+        self._real_ratio = real_ratio
+        self._generated_maxlen = generated_maxlen
 
         self._impl = None
         self._eval_results = defaultdict(list)
         self._loss_history = defaultdict(list)
         self._active_logger = None
 
-        if len(kwargs.keys()) > 0:
+        if kwargs and len(kwargs.keys()) > 0:
             LOG.warning("Unused arguments are passed.", **kwargs)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -331,7 +325,9 @@ class LearnableBase:
     def fit(
         self,
         dataset: Union[List[Episode], MDPDataset],
-        n_epochs: int = 1000,
+        n_epochs: Optional[int] = None,
+        n_steps: Optional[int] = None,
+        n_steps_per_epoch: int = 10000,
         save_metrics: bool = True,
         experiment_name: Optional[str] = None,
         with_timestamp: bool = True,
@@ -345,16 +341,20 @@ class LearnableBase:
             Dict[str, Callable[[Any, List[Episode]], float]]
         ] = None,
         shuffle: bool = True,
+        callback: Optional[Callable[["LearnableBase", int, int], None]] = None,
     ) -> List[Tuple[int, Dict[str, float]]]:
         """Trains with the given dataset.
 
         .. code-block:: python
 
-            algo.fit(episodes)
+            algo.fit(episodes, n_steps=1000000)
 
         Args:
             dataset: list of episodes to train.
             n_epochs: the number of epochs to train.
+            n_steps: the number of steps to train.
+            n_steps_per_epoch: the number of steps per epoch. This value will
+                be ignored when ``n_steps`` is ``None``.
             save_metrics: flag to record metrics in files. If False,
                 the log directory is not created and the model parameters are
                 not saved during training.
@@ -372,6 +372,8 @@ class LearnableBase:
             save_interval: interval to save parameters.
             scorers: list of scorer functions used with `eval_episodes`.
             shuffle: flag to shuffle transitions on each epoch.
+            callback: callable function that takes ``(algo, epoch, total_step)``
+                , which is called at the end of epochs.
 
         Returns:
             list of result tuples (epoch, metrics) per epoch.
@@ -381,6 +383,8 @@ class LearnableBase:
             self.fitter(
                 dataset,
                 n_epochs,
+                n_steps,
+                n_steps_per_epoch,
                 save_metrics,
                 experiment_name,
                 with_timestamp,
@@ -392,6 +396,7 @@ class LearnableBase:
                 save_interval,
                 scorers,
                 shuffle,
+                callback,
             )
         )
         return results
@@ -399,7 +404,9 @@ class LearnableBase:
     def fitter(
         self,
         dataset: Union[List[Episode], MDPDataset],
-        n_epochs: int = 1000,
+        n_epochs: Optional[int] = None,
+        n_steps: Optional[int] = None,
+        n_steps_per_epoch: int = 10000,
         save_metrics: bool = True,
         experiment_name: Optional[str] = None,
         with_timestamp: bool = True,
@@ -413,6 +420,7 @@ class LearnableBase:
             Dict[str, Callable[[Any, List[Episode]], float]]
         ] = None,
         shuffle: bool = True,
+        callback: Optional[Callable[["LearnableBase", int, int], None]] = None,
     ) -> Generator[Tuple[int, Dict[str, float]], None, None]:
         """Iterate over epochs steps to train with the given dataset. At each
              iteration algo methods and properties can be changed or queried.
@@ -426,6 +434,9 @@ class LearnableBase:
         Args:
             dataset: list of episodes to train.
             n_epochs: the number of epochs to train.
+            n_steps: the number of steps to train.
+            n_steps_per_epoch: the number of steps per epoch. This value will
+                be ignored when ``n_steps`` is ``None``.
             save_metrics: flag to record metrics in files. If False,
                 the log directory is not created and the model parameters are
                 not saved during training.
@@ -443,6 +454,8 @@ class LearnableBase:
             save_interval: interval to save parameters.
             scorers: list of scorer functions used with `eval_episodes`.
             shuffle: flag to shuffle transitions on each epoch.
+            callback: callable function that takes ``(algo, epoch, total_step)``
+                , which is called at the end of epochs.
 
         Returns:
             iterator yielding current epoch and metrics dict.
@@ -454,14 +467,47 @@ class LearnableBase:
         else:
             episodes = dataset
 
-        iterator = RoundIterator(
-            episodes,
-            batch_size=self._batch_size,
-            n_steps=self._n_steps,
-            gamma=self._gamma,
-            n_frames=self._n_frames,
-            shuffle=shuffle,
-        )
+        # check action space
+        if self.get_action_type() == ActionSpace.BOTH:
+            pass
+        elif len(episodes[0].actions.shape) > 1:
+            assert (
+                self.get_action_type() == ActionSpace.CONTINUOUS
+            ), CONTINUOUS_ACTION_SPACE_MISMATCH_ERROR
+        else:
+            assert (
+                self.get_action_type() == ActionSpace.DISCRETE
+            ), DISCRETE_ACTION_SPACE_MISMATCH_ERROR
+
+        iterator: TransitionIterator
+        if n_epochs is None and n_steps is not None:
+            assert n_steps >= n_steps_per_epoch
+            n_epochs = n_steps // n_steps_per_epoch
+            iterator = RandomIterator(
+                episodes,
+                n_steps_per_epoch,
+                batch_size=self._batch_size,
+                n_steps=self._n_steps,
+                gamma=self._gamma,
+                n_frames=self._n_frames,
+                real_ratio=self._real_ratio,
+                generated_maxlen=self._generated_maxlen,
+            )
+            LOG.debug("RandomIterator is selected.")
+        elif n_epochs is not None and n_steps is None:
+            iterator = RoundIterator(
+                episodes,
+                batch_size=self._batch_size,
+                n_steps=self._n_steps,
+                gamma=self._gamma,
+                n_frames=self._n_frames,
+                real_ratio=self._real_ratio,
+                generated_maxlen=self._generated_maxlen,
+                shuffle=shuffle,
+            )
+            LOG.debug("RoundIterator is selected.")
+        else:
+            raise ValueError("Either of n_epochs or n_steps must be given.")
 
         # setup logger
         logger = self._prepare_logger(
@@ -513,23 +559,33 @@ class LearnableBase:
         total_step = 0
         for epoch in range(1, n_epochs + 1):
 
-            # data augmentation
-            new_transitions = self._generate_new_data(iterator.transitions)
-            if new_transitions:
-                iterator.set_ephemeral_transitions(new_transitions)
-
             # dict to add incremental mean losses to epoch
             epoch_loss = defaultdict(list)
 
             range_gen = tqdm(
                 range(len(iterator)),
                 disable=not show_progress,
-                desc="Epoch %d" % int(epoch),
+                desc=f"Epoch {int(epoch)}/{n_epochs}",
             )
 
             iterator.reset()
 
             for itr in range_gen:
+
+                # generate new transitions with dynamics models
+                new_transitions = self.generate_new_data(
+                    epoch=epoch,
+                    total_step=total_step,
+                    transitions=iterator.transitions,
+                )
+                if new_transitions:
+                    iterator.add_generated_transitions(new_transitions)
+                    LOG.debug(
+                        f"{len(new_transitions)} transitions are generated.",
+                        real_transitions=len(iterator.transitions),
+                        fake_transitions=len(iterator.generated_transitions),
+                    )
+
                 with logger.measure_time("step"):
                     # pick transitions
                     with logger.measure_time("sample_batch"):
@@ -540,10 +596,9 @@ class LearnableBase:
                         loss = self.update(epoch, total_step, batch)
 
                     # record metrics
-                    for name, val in zip(self.get_loss_labels(), loss):
-                        if val is not None:
-                            logger.add_metric(name, val)
-                            epoch_loss[name].append(val)
+                    for name, val in loss.items():
+                        logger.add_metric(name, val)
+                        epoch_loss[name].append(val)
 
                     # update progress postfix with losses
                     if itr % 10 == 0:
@@ -557,12 +612,16 @@ class LearnableBase:
             # save loss to loss history dict
             self._loss_history["epoch"].append(epoch)
             self._loss_history["step"].append(total_step)
-            for name in self.get_loss_labels():
-                if name in epoch_loss:
-                    self._loss_history[name].append(np.mean(epoch_loss[name]))
+            for name, vals in epoch_loss.items():
+                if vals:
+                    self._loss_history[name].append(np.mean(vals))
 
             if scorers and eval_episodes:
                 self._evaluate(eval_episodes, scorers, logger)
+
+            # call callback if given
+            if callback:
+                callback(self, epoch, total_step)
 
             # save metrics
             metrics = logger.commit(epoch, total_step)
@@ -636,7 +695,7 @@ class LearnableBase:
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         """Update parameters with mini-batch of data.
 
         Args:
@@ -645,19 +704,21 @@ class LearnableBase:
             batch: mini-batch data.
 
         Returns:
-            list: loss values.
+            dictionary of metrics.
 
         """
         raise NotImplementedError
 
-    def _generate_new_data(
-        self, transitions: List[Transition]
+    def generate_new_data(
+        self, epoch: int, total_step: int, transitions: List[Transition]
     ) -> Optional[List[Transition]]:
         """Returns generated transitions for data augmentation.
 
-        This method is called at the beginning of every epoch.
+        This method is for model-based RL algorithms.
 
         Args:
+            epoch: the current epoch.
+            total_step: the total update steps.
             transitions: list of transitions.
 
         Returns:
@@ -665,9 +726,6 @@ class LearnableBase:
 
         """
         return None
-
-    def get_loss_labels(self) -> List[str]:
-        raise NotImplementedError
 
     def _prepare_logger(
         self,
@@ -742,6 +800,15 @@ class LearnableBase:
         params = _serialize_params(params)
 
         logger.add_params(params)
+
+    def get_action_type(self) -> ActionSpace:
+        """Returns action type (continuous or discrete).
+
+        Returns:
+            action type.
+
+        """
+        raise NotImplementedError
 
     @property
     def batch_size(self) -> int:

@@ -1,4 +1,6 @@
-from typing import List, Tuple, cast
+# pylint: disable=protected-access
+
+from typing import List, Optional, Tuple, cast
 
 import torch
 import torch.nn as nn
@@ -20,7 +22,7 @@ def _compute_ensemble_variance(
     elif variance_type == "data":
         data = torch.cat([observations, rewards], dim=2)
         return (data.std(dim=1) ** 2).sum(dim=1, keepdim=True)
-    raise ValueError("invalid variance_type.")
+    raise ValueError(f"invalid variance_type: {variance_type}")
 
 
 def _apply_spectral_norm_recursively(model: nn.Module) -> None:
@@ -29,7 +31,8 @@ def _apply_spectral_norm_recursively(model: nn.Module) -> None:
             for m in module:
                 _apply_spectral_norm_recursively(m)
         else:
-            spectral_norm(module)
+            if "weight" in module._parameters:
+                spectral_norm(module)
 
 
 def _gaussian_likelihood(
@@ -39,8 +42,8 @@ def _gaussian_likelihood(
     return (((mu - x) ** 2) * inv_std).mean(dim=1, keepdim=True)
 
 
-class ProbablisticDynamics(nn.Module):  # type: ignore
-    """Probablistic dynamics model.
+class ProbabilisticDynamicsModel(nn.Module):  # type: ignore
+    """Probabilistic dynamics model.
 
     References:
         * `Janner et al., When to Trust Your Model: Model-Based Policy
@@ -139,27 +142,38 @@ class ProbablisticDynamics(nn.Module):  # type: ignore
         return loss.view(-1, 1)
 
 
-class EnsembleDynamics(nn.Module):  # type: ignore
+class ProbabilisticEnsembleDynamicsModel(nn.Module):  # type: ignore
     _models: nn.ModuleList
 
-    def __init__(self, models: List[ProbablisticDynamics]):
+    def __init__(self, models: List[ProbabilisticDynamicsModel]):
         super().__init__()
         self._models = nn.ModuleList(models)
 
     def forward(
-        self, x: torch.Tensor, action: torch.Tensor
+        self,
+        x: torch.Tensor,
+        action: torch.Tensor,
+        indices: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self.predict_with_variance(x, action)[:2]
+        return self.predict_with_variance(x, action, indices=indices)[:2]
 
     def __call__(
-        self, x: torch.Tensor, action: torch.Tensor
+        self,
+        x: torch.Tensor,
+        action: torch.Tensor,
+        indices: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         return cast(
-            Tuple[torch.Tensor, torch.Tensor], super().__call__(x, action)
+            Tuple[torch.Tensor, torch.Tensor],
+            super().__call__(x, action, indices),
         )
 
     def predict_with_variance(
-        self, x: torch.Tensor, action: torch.Tensor, variance_type: str = "data"
+        self,
+        x: torch.Tensor,
+        action: torch.Tensor,
+        variance_type: str = "data",
+        indices: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         observations_list: List[torch.Tensor] = []
         rewards_list: List[torch.Tensor] = []
@@ -172,20 +186,25 @@ class EnsembleDynamics(nn.Module):  # type: ignore
             rewards_list.append(rew.view(1, x.shape[0], 1))
             variances_list.append(var.view(1, x.shape[0], 1))
 
-        all_observations = torch.cat(observations_list, dim=0).transpose(0, 1)
-        all_rewards = torch.cat(rewards_list, dim=0).transpose(0, 1)
+        # (ensemble, batch, -1) -> (batch, ensemble, -1)
+        observations = torch.cat(observations_list, dim=0).transpose(0, 1)
+        rewards = torch.cat(rewards_list, dim=0).transpose(0, 1)
         variances = torch.cat(variances_list, dim=0).transpose(0, 1)
 
-        # uniformly sample from ensemble outputs
-        indices = torch.randint(0, len(self._models), size=(x.shape[0],))
-        observations = all_observations[torch.arange(x.shape[0]), indices]
-        rewards = all_rewards[torch.arange(x.shape[0]), indices]
-
         variances = _compute_ensemble_variance(
-            all_observations, all_rewards, variances, variance_type
+            observations=observations,
+            rewards=rewards,
+            variances=variances,
+            variance_type=variance_type,
         )
 
-        return observations, rewards, variances
+        if indices is None:
+            return observations, rewards, variances
+
+        # pick samples based on indices
+        partial_observations = observations[torch.arange(x.shape[0]), indices]
+        partial_rewards = rewards[torch.arange(x.shape[0]), indices]
+        return partial_observations, partial_rewards, variances
 
     def compute_error(
         self,
@@ -193,13 +212,19 @@ class EnsembleDynamics(nn.Module):  # type: ignore
         act_t: torch.Tensor,
         rew_tp1: torch.Tensor,
         obs_tp1: torch.Tensor,
+        masks: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         loss_sum = torch.tensor(0.0, dtype=torch.float32, device=obs_t.device)
-        for model in self._models:
-            # bootstrapping
+        for i, model in enumerate(self._models):
             loss = model.compute_error(obs_t, act_t, rew_tp1, obs_tp1)
             assert loss.shape == (obs_t.shape[0], 1)
-            mask = torch.randint(0, 2, size=loss.shape, device=obs_t.device)
+
+            # create mask if necessary
+            if masks is None:
+                mask = torch.randint(0, 2, size=loss.shape, device=obs_t.device)
+            else:
+                mask = masks[i]
+
             loss_sum += (loss * mask).mean()
 
         return loss_sum

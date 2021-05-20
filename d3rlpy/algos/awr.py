@@ -1,24 +1,21 @@
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 
 from ..argument_utility import (
     ActionScalerArg,
-    AugmentationArg,
     EncoderArg,
     ScalerArg,
     UseGPUArg,
-    check_augmentation,
     check_encoder,
     check_use_gpu,
 )
-from ..augmentation import AugmentationPipeline
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..constants import IMPL_NOT_INITIALIZED_ERROR, ActionSpace
 from ..dataset import TransitionMiniBatch, compute_lambda_return
 from ..gpu import Device
 from ..models.encoders import EncoderFactory
 from ..models.optimizers import OptimizerFactory, SGDFactory
-from .base import AlgoBase, DataGenerator
+from .base import AlgoBase
 from .torch.awr_impl import AWRBaseImpl, AWRImpl, DiscreteAWRImpl
 
 
@@ -36,7 +33,6 @@ class _AWRBase(AlgoBase):
     _lam: float
     _beta: float
     _max_weight: float
-    _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
     _impl: Optional[AWRBaseImpl]
 
@@ -61,8 +57,6 @@ class _AWRBase(AlgoBase):
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
         action_scaler: ActionScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[AWRImpl] = None,
         **kwargs: Any
     ):
@@ -74,7 +68,6 @@ class _AWRBase(AlgoBase):
             gamma=gamma,
             scaler=scaler,
             action_scaler=action_scaler,
-            generator=generator,
             kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
@@ -89,7 +82,6 @@ class _AWRBase(AlgoBase):
         self._lam = lam
         self._beta = beta
         self._max_weight = max_weight
-        self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
@@ -137,8 +129,10 @@ class _AWRBase(AlgoBase):
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
+
+        metrics = {}
 
         # compute lmabda return
         lambda_returns = self._compute_lambda_returns(batch)
@@ -148,6 +142,7 @@ class _AWRBase(AlgoBase):
 
         # compute weights
         clipped_weights = self._compute_clipped_weights(advantages)
+        metrics.update({"weights": np.mean(clipped_weights)})
 
         n_steps_per_batch = self.batch_size // self._batch_size_per_update
 
@@ -162,6 +157,7 @@ class _AWRBase(AlgoBase):
                 critic_loss = self._impl.update_critic(observations, returns)
                 critic_loss_history.append(critic_loss)
         critic_loss_mean = np.mean(critic_loss_history)
+        metrics.update({"critic_loss": critic_loss_mean})
 
         # update actor
         actor_loss_history = []
@@ -177,11 +173,9 @@ class _AWRBase(AlgoBase):
                 )
                 actor_loss_history.append(actor_loss)
         actor_loss_mean = np.mean(actor_loss_history)
+        metrics.update({"actor_loss": actor_loss_mean})
 
-        return [critic_loss_mean, actor_loss_mean, np.mean(clipped_weights)]
-
-    def get_loss_labels(self) -> List[str]:
-        return ["critic_loss", "actor_loss", "weights"]
+        return metrics
 
 
 class AWR(_AWRBase):
@@ -240,10 +234,6 @@ class AWR(_AWRBase):
             The available options are `['pixel', 'min_max', 'standard']`.
         action_scaler (d3rlpy.preprocessing.ActionScaler or str):
             action preprocessor. The available options are ``['min_max']``.
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.awr_impl.AWRImpl): algorithm implementation.
 
     """
@@ -265,9 +255,11 @@ class AWR(_AWRBase):
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=self._action_scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
+
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.CONTINUOUS
 
 
 class DiscreteAWR(_AWRBase):
@@ -324,10 +316,6 @@ class DiscreteAWR(_AWRBase):
             flag to use GPU, device ID or device.
         scaler (d3rlpy.preprocessing.Scaler or str): preprocessor.
             The available options are `['pixel', 'min_max', 'standard']`.
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.awr_impl.DiscreteAWRImpl):
             algorithm implementation.
 
@@ -350,6 +338,8 @@ class DiscreteAWR(_AWRBase):
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=None,
-            augmentation=self._augmentation,
         )
         self._impl.build()
+
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.DISCRETE

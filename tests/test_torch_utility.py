@@ -5,8 +5,11 @@ import numpy as np
 import pytest
 import torch
 
+from d3rlpy.dataset import Transition, TransitionMiniBatch
 from d3rlpy.torch_utility import (
-    augmentation_api,
+    Swish,
+    TorchMiniBatch,
+    View,
     eval_api,
     freeze,
     get_state_dict,
@@ -73,7 +76,6 @@ class DummyImpl:
         self._device = "cpu:0"
         self._scaler = None
         self._action_scaler = None
-        self._augmentation = None
 
     @torch_api()
     def torch_api_func(self, x):
@@ -91,6 +93,11 @@ class DummyImpl:
         assert torch.allclose(x, torch.tensor(ref_x, dtype=torch.float32))
         assert torch.allclose(y, torch.tensor(ref_y, dtype=torch.float32))
 
+    @torch_api()
+    def torch_api_func_with_batch(self, batch):
+        assert isinstance(batch, TorchMiniBatch)
+        return batch
+
     @train_api
     def train_api_func(self):
         assert self._fc1.training
@@ -100,10 +107,6 @@ class DummyImpl:
     def eval_api_func(self):
         assert not self._fc1.training
         assert not self._fc2.training
-
-    @augmentation_api(targets=["x"])
-    def augmentation_api_func(self, x, y):
-        return x + y
 
     @property
     def device(self):
@@ -116,10 +119,6 @@ class DummyImpl:
     @property
     def action_scaler(self):
         return self._action_scaler
-
-    @property
-    def augmentation(self):
-        return self._augmentation
 
 
 def check_if_same_dict(a, b):
@@ -216,6 +215,85 @@ def test_unfreeze():
         assert p.requires_grad
 
 
+@pytest.mark.parametrize("batch_size", [32])
+@pytest.mark.parametrize("observation_shape", [(100,)])
+@pytest.mark.parametrize("action_size", [2])
+@pytest.mark.parametrize("use_scaler", [False, True])
+@pytest.mark.parametrize("use_action_scaler", [False, True])
+def test_torch_mini_batch(
+    batch_size, observation_shape, action_size, use_scaler, use_action_scaler
+):
+    obs_shape = (batch_size,) + observation_shape
+    transitions = []
+    for _ in range(batch_size):
+        transition = Transition(
+            observation_shape=observation_shape,
+            action_size=action_size,
+            observation=np.random.random(obs_shape),
+            action=np.random.random(action_size),
+            reward=np.random.random(),
+            next_observation=np.random.random(obs_shape),
+            next_action=np.random.random(action_size),
+            next_reward=np.random.random(),
+            terminal=0.0,
+        )
+        transitions.append(transition)
+
+    if use_scaler:
+
+        class DummyScaler:
+            def transform(self, x):
+                return x + 0.1
+
+        scaler = DummyScaler()
+    else:
+        scaler = None
+
+    if use_action_scaler:
+
+        class DummyActionScaler:
+            def transform(self, x):
+                return x + 0.2
+
+        action_scaler = DummyActionScaler()
+    else:
+        action_scaler = None
+
+    batch = TransitionMiniBatch(transitions)
+
+    torch_batch = TorchMiniBatch(
+        batch=batch, device="cpu:0", scaler=scaler, action_scaler=action_scaler
+    )
+
+    if use_scaler:
+        assert np.all(
+            torch_batch.observations.numpy() == batch.observations + 0.1
+        )
+        assert np.all(
+            torch_batch.next_observations.numpy()
+            == batch.next_observations + 0.1
+        )
+    else:
+        assert np.all(torch_batch.observations.numpy() == batch.observations)
+        assert np.all(
+            torch_batch.next_observations.numpy() == batch.next_observations
+        )
+
+    if use_action_scaler:
+        assert np.all(torch_batch.actions.numpy() == batch.actions + 0.2)
+        assert np.all(
+            torch_batch.next_actions.numpy() == batch.next_actions + 0.2
+        )
+    else:
+        assert np.all(torch_batch.actions.numpy() == batch.actions)
+        assert np.all(torch_batch.next_actions.numpy() == batch.next_actions)
+
+    assert np.all(torch_batch.rewards.numpy() == batch.rewards)
+    assert np.all(torch_batch.next_rewards.numpy() == batch.next_rewards)
+    assert np.all(torch_batch.terminals.numpy() == batch.terminals)
+    assert np.all(torch_batch.n_steps.numpy() == batch.n_steps)
+
+
 def test_torch_api():
     impl = DummyImpl()
     impl._scaler = None
@@ -254,6 +332,87 @@ def test_torch_api_with_action_scaler():
     impl.torch_api_func_with_action_scaler(x, y, ref_x=x + 0.1, ref_y=y)
 
 
+@pytest.mark.parametrize("batch_size", [32])
+@pytest.mark.parametrize("observation_shape", [(100,)])
+@pytest.mark.parametrize("action_size", [2])
+@pytest.mark.parametrize("use_scaler", [False, True])
+@pytest.mark.parametrize("use_action_scaler", [False, True])
+def test_torch_api_with_batch(
+    batch_size, observation_shape, action_size, use_scaler, use_action_scaler
+):
+    obs_shape = (batch_size,) + observation_shape
+    transitions = []
+    for _ in range(batch_size):
+        transition = Transition(
+            observation_shape=observation_shape,
+            action_size=action_size,
+            observation=np.random.random(obs_shape),
+            action=np.random.random(action_size),
+            reward=np.random.random(),
+            next_observation=np.random.random(obs_shape),
+            next_action=np.random.random(action_size),
+            next_reward=np.random.random(),
+            terminal=0.0,
+        )
+        transitions.append(transition)
+
+    if use_scaler:
+
+        class DummyScaler:
+            def transform(self, x):
+                return x + 0.1
+
+        scaler = DummyScaler()
+    else:
+        scaler = None
+
+    if use_action_scaler:
+
+        class DummyActionScaler:
+            def transform(self, x):
+                return x + 0.2
+
+        action_scaler = DummyActionScaler()
+    else:
+        action_scaler = None
+
+    batch = TransitionMiniBatch(transitions)
+
+    impl = DummyImpl()
+    impl._scaler = scaler
+    impl._action_scaler = action_scaler
+
+    torch_batch = impl.torch_api_func_with_batch(batch)
+
+    if use_scaler:
+        assert np.all(
+            torch_batch.observations.numpy() == batch.observations + 0.1
+        )
+        assert np.all(
+            torch_batch.next_observations.numpy()
+            == batch.next_observations + 0.1
+        )
+    else:
+        assert np.all(torch_batch.observations.numpy() == batch.observations)
+        assert np.all(
+            torch_batch.next_observations.numpy() == batch.next_observations
+        )
+
+    if use_action_scaler:
+        assert np.all(torch_batch.actions.numpy() == batch.actions + 0.2)
+        assert np.all(
+            torch_batch.next_actions.numpy() == batch.next_actions + 0.2
+        )
+    else:
+        assert np.all(torch_batch.actions.numpy() == batch.actions)
+        assert np.all(torch_batch.next_actions.numpy() == batch.next_actions)
+
+    assert np.all(torch_batch.rewards.numpy() == batch.rewards)
+    assert np.all(torch_batch.next_rewards.numpy() == batch.next_rewards)
+    assert np.all(torch_batch.terminals.numpy() == batch.terminals)
+    assert np.all(torch_batch.n_steps.numpy() == batch.n_steps)
+
+
 def test_train_api():
     impl = DummyImpl()
     impl._fc1.eval()
@@ -270,18 +429,18 @@ def test_eval_api():
     impl.eval_api_func()
 
 
-def test_augmentation_api():
-    impl = DummyImpl()
+@pytest.mark.parametrize("in_shape", [(1, 2, 3)])
+@pytest.mark.parametrize("out_shape", [(1, 6)])
+def test_view(in_shape, out_shape):
+    x = torch.rand(in_shape)
+    view = View(out_shape)
+    assert view(x).shape == out_shape
 
-    class DummyAugmentationPipeline:
-        def process(self, f, inputs, targets):
-            for k, v in inputs.items():
-                if k in targets:
-                    inputs[k] = v + 1.0
-            return f(**inputs)
 
-    impl._augmentation = DummyAugmentationPipeline()
-
-    x = torch.tensor(1.0)
-    y = torch.tensor(2.0)
-    assert impl.augmentation_api_func(x, y).numpy() == 4.0
+@pytest.mark.parametrize("in_shape", [(1, 2, 3)])
+def test_swish(in_shape):
+    x = torch.rand(in_shape)
+    swish = Swish()
+    y = swish(x)
+    assert y.shape == in_shape
+    assert torch.allclose(y, x * torch.sigmoid(x))

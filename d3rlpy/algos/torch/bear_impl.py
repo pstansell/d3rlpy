@@ -5,19 +5,18 @@ import numpy as np
 import torch
 from torch.optim import Optimizer
 
-from ...augmentation import AugmentationPipeline
 from ...gpu import Device
-from ...models.builders import create_parameter, create_probablistic_regressor
+from ...models.builders import create_conditional_vae, create_parameter
 from ...models.encoders import EncoderFactory
 from ...models.optimizers import OptimizerFactory
 from ...models.q_functions import QFunctionFactory
 from ...models.torch import (
+    ConditionalVAE,
     Parameter,
-    ProbablisticRegressor,
     compute_max_with_n_actions_and_indices,
 )
 from ...preprocessing import ActionScaler, Scaler
-from ...torch_utility import augmentation_api, torch_api, train_api
+from ...torch_utility import TorchMiniBatch, torch_api, train_api
 from .sac_impl import SACImpl
 
 
@@ -46,9 +45,11 @@ class BEARImpl(SACImpl):
     _alpha_threshold: float
     _lam: float
     _n_action_samples: int
+    _n_target_samples: int
     _mmd_kernel: str
     _mmd_sigma: float
-    _imitator: Optional[ProbablisticRegressor]
+    _vae_kl_weight: float
+    _imitator: Optional[ConditionalVAE]
     _imitator_optim: Optional[Optimizer]
     _log_alpha: Optional[Parameter]
     _alpha_optim: Optional[Optimizer]
@@ -79,12 +80,13 @@ class BEARImpl(SACImpl):
         alpha_threshold: float,
         lam: float,
         n_action_samples: int,
+        n_target_samples: int,
         mmd_kernel: str,
         mmd_sigma: float,
+        vae_kl_weight: float,
         use_gpu: Optional[Device],
         scaler: Optional[Scaler],
         action_scaler: Optional[ActionScaler],
-        augmentation: AugmentationPipeline,
     ):
         super().__init__(
             observation_shape=observation_shape,
@@ -106,7 +108,6 @@ class BEARImpl(SACImpl):
             use_gpu=use_gpu,
             scaler=scaler,
             action_scaler=action_scaler,
-            augmentation=augmentation,
         )
         self._imitator_learning_rate = imitator_learning_rate
         self._alpha_learning_rate = alpha_learning_rate
@@ -117,8 +118,10 @@ class BEARImpl(SACImpl):
         self._alpha_threshold = alpha_threshold
         self._lam = lam
         self._n_action_samples = n_action_samples
+        self._n_target_samples = n_target_samples
         self._mmd_kernel = mmd_kernel
         self._mmd_sigma = mmd_sigma
+        self._vae_kl_weight = vae_kl_weight
 
         # initialized in build
         self._imitator = None
@@ -134,10 +137,12 @@ class BEARImpl(SACImpl):
         self._build_alpha_optim()
 
     def _build_imitator(self) -> None:
-        self._imitator = create_probablistic_regressor(
-            self._observation_shape,
-            self._action_size,
-            self._imitator_encoder_factory,
+        self._imitator = create_conditional_vae(
+            observation_shape=self._observation_shape,
+            action_size=self._action_size,
+            latent_size=2 * self._action_size,
+            beta=self._vae_kl_weight,
+            encoder_factory=self._imitator_encoder_factory,
         )
 
     def _build_imitator_optim(self) -> None:
@@ -156,28 +161,24 @@ class BEARImpl(SACImpl):
             self._log_alpha.parameters(), lr=self._alpha_learning_rate
         )
 
-    def _compute_actor_loss(self, obs_t: torch.Tensor) -> torch.Tensor:
-        loss = super()._compute_actor_loss(obs_t)
-        mmd_loss = self._compute_mmd_loss(obs_t)
+    def compute_actor_loss(self, batch: TorchMiniBatch) -> torch.Tensor:
+        loss = super().compute_actor_loss(batch)
+        mmd_loss = self._compute_mmd_loss(batch.observations)
         return loss + mmd_loss
 
     @train_api
-    @torch_api(scaler_targets=["obs_t"])
-    def warmup_actor(self, obs_t: torch.Tensor) -> np.ndarray:
+    @torch_api()
+    def warmup_actor(self, batch: TorchMiniBatch) -> np.ndarray:
         assert self._actor_optim is not None
 
         self._actor_optim.zero_grad()
 
-        loss = self.compute_mmd_loss(obs_t)
+        loss = self._compute_mmd_loss(batch.observations)
 
         loss.backward()
         self._actor_optim.step()
 
         return loss.cpu().detach().numpy()
-
-    @augmentation_api(targets=["obs_t"])
-    def compute_mmd_loss(self, obs_t: torch.Tensor) -> torch.Tensor:
-        return self._compute_mmd_loss(obs_t)
 
     def _compute_mmd_loss(self, obs_t: torch.Tensor) -> torch.Tensor:
         assert self._log_alpha
@@ -186,15 +187,13 @@ class BEARImpl(SACImpl):
         return (alpha * (mmd - self._alpha_threshold)).sum(dim=1).mean()
 
     @train_api
-    @torch_api(scaler_targets=["obs_t"], action_scaler_targets=["act_t"])
-    def update_imitator(
-        self, obs_t: torch.Tensor, act_t: torch.Tensor
-    ) -> np.ndarray:
+    @torch_api()
+    def update_imitator(self, batch: TorchMiniBatch) -> np.ndarray:
         assert self._imitator_optim is not None
 
         self._imitator_optim.zero_grad()
 
-        loss = self.compute_imitator_loss(obs_t, act_t)
+        loss = self.compute_imitator_loss(batch)
 
         loss.backward()
 
@@ -202,20 +201,17 @@ class BEARImpl(SACImpl):
 
         return loss.cpu().detach().numpy()
 
-    @augmentation_api(targets=["obs_t"])
-    def compute_imitator_loss(
-        self, obs_t: torch.Tensor, act_t: torch.Tensor
-    ) -> torch.Tensor:
+    def compute_imitator_loss(self, batch: TorchMiniBatch) -> torch.Tensor:
         assert self._imitator is not None
-        return self._imitator.compute_error(obs_t, act_t)
+        return self._imitator.compute_error(batch.observations, batch.actions)
 
     @train_api
-    @torch_api(scaler_targets=["obs_t"])
-    def update_alpha(self, obs_t: torch.Tensor) -> np.ndarray:
+    @torch_api()
+    def update_alpha(self, batch: TorchMiniBatch) -> np.ndarray:
         assert self._alpha_optim is not None
         assert self._log_alpha is not None
 
-        loss = -self._compute_mmd_loss(obs_t)
+        loss = -self._compute_mmd_loss(batch.observations)
 
         self._alpha_optim.zero_grad()
         loss.backward()
@@ -275,19 +271,22 @@ class BEARImpl(SACImpl):
 
         return (mmd + 1e-6).sqrt().view(-1, 1)
 
-    @augmentation_api(targets=["x"])
-    def compute_target(self, x: torch.Tensor) -> torch.Tensor:
+    def compute_target(self, batch: TorchMiniBatch) -> torch.Tensor:
         assert self._policy is not None
         assert self._targ_q_func is not None
         assert self._log_temp is not None
         with torch.no_grad():
             # BCQ-like target computation
-            actions, log_probs = self._policy.sample_n_with_log_prob(x, 100)
+            actions, log_probs = self._policy.sample_n_with_log_prob(
+                batch.next_observations,
+                self._n_target_samples,
+            )
             values, indices = compute_max_with_n_actions_and_indices(
-                x, actions, self._targ_q_func, self._lam
+                batch.next_observations, actions, self._targ_q_func, self._lam
             )
 
             # (batch, n, 1) -> (batch, 1)
-            max_log_prob = log_probs[torch.arange(x.shape[0]), indices]
+            batch_size = batch.observations.shape[0]
+            max_log_prob = log_probs[torch.arange(batch_size), indices]
 
             return values - self._log_temp().exp() * max_log_prob

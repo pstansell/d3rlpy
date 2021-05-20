@@ -1,13 +1,16 @@
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import gym
 import numpy as np
 
-from ..argument_utility import ActionScalerArg, ScalerArg
 from ..base import ImplBase, LearnableBase
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
-from ..dataset import Transition
+from ..constants import (
+    CONTINUOUS_ACTION_SPACE_MISMATCH_ERROR,
+    DISCRETE_ACTION_SPACE_MISMATCH_ERROR,
+    IMPL_NOT_INITIALIZED_ERROR,
+    ActionSpace,
+)
 from ..envs import BatchEnv
 from ..online.buffers import (
     BatchBuffer,
@@ -16,7 +19,26 @@ from ..online.buffers import (
     ReplayBuffer,
 )
 from ..online.explorers import Explorer
-from ..online.iterators import train_batch_env, train_single_env
+from ..online.iterators import (
+    AlgoProtocol,
+    collect,
+    train_batch_env,
+    train_single_env,
+)
+
+
+def _assert_action_space(algo: LearnableBase, env: gym.Env) -> None:
+    if isinstance(env.action_space, gym.spaces.Box):
+        assert (
+            algo.get_action_type() == ActionSpace.CONTINUOUS
+        ), CONTINUOUS_ACTION_SPACE_MISMATCH_ERROR
+    elif isinstance(env.action_space, gym.spaces.discrete.Discrete):
+        assert (
+            algo.get_action_type() == ActionSpace.DISCRETE
+        ), DISCRETE_ACTION_SPACE_MISMATCH_ERROR
+    else:
+        action_space = type(env.action_space)
+        raise ValueError(f"The action-space is not supported: {action_space}")
 
 
 class AlgoImplBase(ImplBase):
@@ -44,39 +66,9 @@ class AlgoImplBase(ImplBase):
         pass
 
 
-class DataGenerator:
-    def generate(
-        self, algo: "AlgoBase", transitions: List[Transition]
-    ) -> List[Transition]:
-        pass
-
-
 class AlgoBase(LearnableBase):
 
-    _generator: Optional[DataGenerator]
     _impl: Optional[AlgoImplBase]
-
-    def __init__(
-        self,
-        batch_size: int,
-        n_frames: int,
-        n_steps: int,
-        gamma: float,
-        scaler: ScalerArg,
-        action_scaler: ActionScalerArg,
-        generator: Optional[DataGenerator],
-        kwargs: Dict[str, Any],
-    ):
-        super().__init__(
-            batch_size=batch_size,
-            n_frames=n_frames,
-            n_steps=n_steps,
-            gamma=gamma,
-            scaler=scaler,
-            action_scaler=action_scaler,
-            kwargs=kwargs,
-        )
-        self._generator = generator
 
     def save_policy(self, fname: str, as_onnx: bool = False) -> None:
         """Save the greedy-policy computational graph as TorchScript or ONNX.
@@ -207,6 +199,7 @@ class AlgoBase(LearnableBase):
         show_progress: bool = True,
         tensorboard_dir: Optional[str] = None,
         timelimit_aware: bool = True,
+        callback: Optional[Callable[[AlgoProtocol, int, int], None]] = None,
     ) -> None:
         """Start training loop of online deep reinforcement learning.
 
@@ -236,12 +229,17 @@ class AlgoBase(LearnableBase):
             timelimit_aware: flag to turn ``terminal`` flag ``False`` when
                 ``TimeLimit.truncated`` flag is ``True``, which is designed to
                 incorporate with ``gym.wrappers.TimeLimit``.
+            callback: callable function that takes ``(algo, epoch, total_step)``
+                , which is called at the end of epochs.
 
         """
 
         # create default replay buffer
         if buffer is None:
             buffer = ReplayBuffer(1000000, env=env)
+
+        # check action-space
+        _assert_action_space(self, env)
 
         train_single_env(
             algo=self,
@@ -263,6 +261,7 @@ class AlgoBase(LearnableBase):
             show_progress=show_progress,
             tensorboard_dir=tensorboard_dir,
             timelimit_aware=timelimit_aware,
+            callback=callback,
         )
 
     def fit_batch_online(
@@ -285,6 +284,7 @@ class AlgoBase(LearnableBase):
         show_progress: bool = True,
         tensorboard_dir: Optional[str] = None,
         timelimit_aware: bool = True,
+        callback: Optional[Callable[[AlgoProtocol, int, int], None]] = None,
     ) -> None:
         """Start training loop of batch online deep reinforcement learning.
 
@@ -315,12 +315,17 @@ class AlgoBase(LearnableBase):
             timelimit_aware: flag to turn ``terminal`` flag ``False`` when
                 ``TimeLimit.truncated`` flag is ``True``, which is designed to
                 incorporate with ``gym.wrappers.TimeLimit``.
+            callback: callable function that takes ``(algo, epoch, total_step)``
+                , which is called at the end of epochs.
 
         """
 
         # create default replay buffer
         if buffer is None:
             buffer = BatchReplayBuffer(1000000, env=env)
+
+        # check action-space
+        _assert_action_space(self, env)
 
         train_batch_env(
             algo=self,
@@ -342,12 +347,51 @@ class AlgoBase(LearnableBase):
             show_progress=show_progress,
             tensorboard_dir=tensorboard_dir,
             timelimit_aware=timelimit_aware,
+            callback=callback,
         )
 
-    def _generate_new_data(
-        self, transitions: List[Transition]
-    ) -> List[Transition]:
-        new_data = []
-        if self._generator:
-            new_data += self._generator.generate(self, transitions)
-        return new_data
+    def collect(
+        self,
+        env: gym.Env,
+        buffer: Optional[Buffer] = None,
+        explorer: Optional[Explorer] = None,
+        n_steps: int = 1000000,
+        show_progress: bool = True,
+        timelimit_aware: bool = True,
+    ) -> Buffer:
+        """Collects data via interaction with environment.
+
+        If ``buffer`` is not given, ``ReplayBuffer`` will be internally created.
+
+        Args:
+            env: gym-like environment.
+            buffer : replay buffer.
+            explorer: action explorer.
+            n_steps: the number of total steps to train.
+            show_progress: flag to show progress bar for iterations.
+            timelimit_aware: flag to turn ``terminal`` flag ``False`` when
+                ``TimeLimit.truncated`` flag is ``True``, which is designed to
+                incorporate with ``gym.wrappers.TimeLimit``.
+
+        Returns:
+            replay buffer with the collected data.
+
+        """
+        # create default replay buffer
+        if buffer is None:
+            buffer = ReplayBuffer(1000000, env=env)
+
+        # check action-space
+        _assert_action_space(self, env)
+
+        collect(
+            algo=self,
+            env=env,
+            buffer=buffer,
+            explorer=explorer,
+            n_steps=n_steps,
+            show_progress=show_progress,
+            timelimit_aware=timelimit_aware,
+        )
+
+        return buffer

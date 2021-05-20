@@ -1,25 +1,22 @@
-from typing import Any, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from ..argument_utility import (
     ActionScalerArg,
-    AugmentationArg,
     EncoderArg,
     QFuncArg,
     ScalerArg,
     UseGPUArg,
-    check_augmentation,
     check_encoder,
     check_q_func,
     check_use_gpu,
 )
-from ..augmentation import AugmentationPipeline
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..constants import IMPL_NOT_INITIALIZED_ERROR, ActionSpace
 from ..dataset import TransitionMiniBatch
 from ..gpu import Device
 from ..models.encoders import EncoderFactory
 from ..models.optimizers import AdamFactory, OptimizerFactory
 from ..models.q_functions import QFunctionFactory
-from .base import AlgoBase, DataGenerator
+from .base import AlgoBase
 from .dqn import DoubleDQN
 from .torch.cql_impl import CQLImpl, DiscreteCQLImpl
 
@@ -100,6 +97,7 @@ class CQL(AlgoBase):
         initial_temperature (float): initial temperature value.
         initial_alpha (float): initial :math:`\alpha` value.
         alpha_threshold (float): threshold value described as :math:`\tau`.
+        conservative_weight (float): constant weight to scale conservative loss.
         n_action_samples (int): the number of sampled actions to compute
             :math:`\log{\sum_a \exp{Q(s, a)}}`.
         soft_q_backup (bool): flag to use SAC-style backup.
@@ -109,10 +107,6 @@ class CQL(AlgoBase):
             The available options are `['pixel', 'min_max', 'standard']`.
         action_scaler (d3rlpy.preprocessing.ActionScaler or str):
             action preprocessor. The available options are ``['min_max']``.
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.cql_impl.CQLImpl): algorithm implementation.
 
     """
@@ -135,9 +129,9 @@ class CQL(AlgoBase):
     _initial_temperature: float
     _initial_alpha: float
     _alpha_threshold: float
+    _conservative_weight: float
     _n_action_samples: int
     _soft_q_backup: bool
-    _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
     _impl: Optional[CQLImpl]
 
@@ -164,15 +158,14 @@ class CQL(AlgoBase):
         target_reduction_type: str = "min",
         update_actor_interval: int = 1,
         initial_temperature: float = 1.0,
-        initial_alpha: float = 5.0,
+        initial_alpha: float = 1.0,
         alpha_threshold: float = 10.0,
+        conservative_weight: float = 5.0,
         n_action_samples: int = 10,
         soft_q_backup: bool = False,
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
         action_scaler: ActionScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[CQLImpl] = None,
         **kwargs: Any
     ):
@@ -183,7 +176,6 @@ class CQL(AlgoBase):
             gamma=gamma,
             scaler=scaler,
             action_scaler=action_scaler,
-            generator=generator,
             kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
@@ -204,9 +196,9 @@ class CQL(AlgoBase):
         self._initial_temperature = initial_temperature
         self._initial_alpha = initial_alpha
         self._alpha_threshold = alpha_threshold
+        self._conservative_weight = conservative_weight
         self._n_action_samples = n_action_samples
         self._soft_q_backup = soft_q_backup
-        self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
@@ -234,67 +226,46 @@ class CQL(AlgoBase):
             initial_temperature=self._initial_temperature,
             initial_alpha=self._initial_alpha,
             alpha_threshold=self._alpha_threshold,
+            conservative_weight=self._conservative_weight,
             n_action_samples=self._n_action_samples,
             soft_q_backup=self._soft_q_backup,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=self._action_scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
 
-        critic_loss = self._impl.update_critic(
-            batch.observations,
-            batch.actions,
-            batch.next_rewards,
-            batch.next_observations,
-            batch.terminals,
-            batch.n_steps,
-            batch.masks,
-        )
+        metrics = {}
+
+        critic_loss = self._impl.update_critic(batch)
+        metrics.update({"critic_loss": critic_loss})
 
         if total_step % self._update_actor_interval == 0:
-            actor_loss = self._impl.update_actor(batch.observations)
+            actor_loss = self._impl.update_actor(batch)
+            metrics.update({"actor_loss": actor_loss})
 
             # lagrangian parameter update for SAC temperature
             if self._temp_learning_rate > 0:
-                temp_loss, temp = self._impl.update_temp(batch.observations)
-            else:
-                temp_loss, temp = None, None
+                temp_loss, temp = self._impl.update_temp(batch)
+                metrics.update({"temp_loss": temp_loss, "temp": temp})
 
             # lagrangian parameter update for conservative loss weight
             if self._alpha_learning_rate > 0:
-                alpha_loss, alpha = self._impl.update_alpha(
-                    batch.observations, batch.actions
-                )
-            else:
-                alpha_loss, alpha = None, None
+                alpha_loss, alpha = self._impl.update_alpha(batch)
+                metrics.update({"alpha_loss": alpha_loss, "alpha": alpha})
 
             self._impl.update_critic_target()
             self._impl.update_actor_target()
-        else:
-            actor_loss = None
-            temp_loss = None
-            temp = None
-            alpha_loss = None
-            alpha = None
 
-        return [critic_loss, actor_loss, temp_loss, temp, alpha_loss, alpha]
+        return metrics
 
-    def get_loss_labels(self) -> List[str]:
-        return [
-            "critic_loss",
-            "actor_loss",
-            "temp_loss",
-            "temp",
-            "alpha_loss",
-            "alpha",
-        ]
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.CONTINUOUS
 
 
 class DiscreteCQL(DoubleDQN):
@@ -341,10 +312,6 @@ class DiscreteCQL(DoubleDQN):
             flag to use GPU, device ID or device.
         scaler (d3rlpy.preprocessing.Scaler or str): preprocessor.
             The available options are `['pixel', 'min_max', 'standard']`
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.cql_impl.DiscreteCQLImpl):
             algorithm implementation.
 
@@ -367,6 +334,5 @@ class DiscreteCQL(DoubleDQN):
             target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()

@@ -1,7 +1,6 @@
 import pytest
 
 from d3rlpy.algos.torch.cql_impl import CQLImpl, DiscreteCQLImpl
-from d3rlpy.augmentation import DrQPipeline
 from d3rlpy.models.encoders import DefaultEncoderFactory
 from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.q_functions import create_q_func_factory
@@ -31,11 +30,11 @@ from tests.algos.algo_test import (
 @pytest.mark.parametrize("initial_temperature", [1.0])
 @pytest.mark.parametrize("initial_alpha", [5.0])
 @pytest.mark.parametrize("alpha_threshold", [10.0])
+@pytest.mark.parametrize("conservative_weight", [5.0])
 @pytest.mark.parametrize("n_action_samples", [10])
 @pytest.mark.parametrize("soft_q_backup", [True])
 @pytest.mark.parametrize("scaler", [None, DummyScaler()])
 @pytest.mark.parametrize("action_scaler", [None, DummyActionScaler()])
-@pytest.mark.parametrize("augmentation", [DrQPipeline()])
 def test_cql_impl(
     observation_shape,
     action_size,
@@ -56,11 +55,11 @@ def test_cql_impl(
     initial_temperature,
     initial_alpha,
     alpha_threshold,
+    conservative_weight,
     n_action_samples,
     soft_q_backup,
     scaler,
     action_scaler,
-    augmentation,
 ):
     impl = CQLImpl(
         observation_shape=observation_shape,
@@ -83,12 +82,12 @@ def test_cql_impl(
         initial_temperature=initial_temperature,
         initial_alpha=initial_alpha,
         alpha_threshold=alpha_threshold,
+        conservative_weight=conservative_weight,
         n_action_samples=n_action_samples,
         soft_q_backup=soft_q_backup,
         use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
-        augmentation=augmentation,
     )
     torch_impl_tester(
         impl, discrete=False, deterministic_best_action=q_func_factory != "iqn"
@@ -105,7 +104,6 @@ def test_cql_impl(
 @pytest.mark.parametrize("n_critics", [1])
 @pytest.mark.parametrize("target_reduction_type", ["min"])
 @pytest.mark.parametrize("scaler", [None, DummyScaler()])
-@pytest.mark.parametrize("augmentation", [DrQPipeline()])
 def test_discrete_cql_impl(
     observation_shape,
     action_size,
@@ -117,7 +115,6 @@ def test_discrete_cql_impl(
     n_critics,
     target_reduction_type,
     scaler,
-    augmentation,
 ):
     impl = DiscreteCQLImpl(
         observation_shape=observation_shape,
@@ -131,7 +128,6 @@ def test_discrete_cql_impl(
         target_reduction_type=target_reduction_type,
         use_gpu=None,
         scaler=scaler,
-        augmentation=augmentation,
     )
     torch_impl_tester(
         impl, discrete=True, deterministic_best_action=q_func_factory != "iqn"

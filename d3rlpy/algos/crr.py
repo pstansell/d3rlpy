@@ -1,25 +1,22 @@
-from typing import Any, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from ..argument_utility import (
     ActionScalerArg,
-    AugmentationArg,
     EncoderArg,
     QFuncArg,
     ScalerArg,
     UseGPUArg,
-    check_augmentation,
     check_encoder,
     check_q_func,
     check_use_gpu,
 )
-from ..augmentation import AugmentationPipeline
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..constants import IMPL_NOT_INITIALIZED_ERROR, ActionSpace
 from ..dataset import TransitionMiniBatch
 from ..gpu import Device
 from ..models.encoders import EncoderFactory
 from ..models.optimizers import AdamFactory, OptimizerFactory
 from ..models.q_functions import QFunctionFactory
-from .base import AlgoBase, DataGenerator
+from .base import AlgoBase
 from .torch.crr_impl import CRRImpl
 
 
@@ -107,10 +104,6 @@ class CRR(AlgoBase):
             The available options are `['pixel', 'min_max', 'standard']`
         action_scaler (d3rlpy.preprocessing.ActionScaler or str):
             action preprocessor. The available options are ``['min_max']``.
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.crr_impl.CRRImpl): algorithm implementation.
 
     """
@@ -131,7 +124,6 @@ class CRR(AlgoBase):
     _target_update_interval: int
     _target_reduction_type: str
     _update_actor_interval: int
-    _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
     _impl: Optional[CRRImpl]
 
@@ -161,8 +153,6 @@ class CRR(AlgoBase):
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
         action_scaler: ActionScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[CRRImpl] = None,
         **kwargs: Any
     ):
@@ -173,7 +163,6 @@ class CRR(AlgoBase):
             gamma=gamma,
             scaler=scaler,
             action_scaler=action_scaler,
-            generator=generator,
             kwargs=kwargs,
         )
         self._actor_learning_rate = actor_learning_rate
@@ -192,7 +181,6 @@ class CRR(AlgoBase):
         self._target_update_interval = target_update_interval
         self._target_reduction_type = target_reduction_type
         self._update_actor_interval = update_actor_interval
-        self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
@@ -220,32 +208,22 @@ class CRR(AlgoBase):
             use_gpu=self._use_gpu,
             scaler=self._scaler,
             action_scaler=self._action_scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
 
-        critic_loss = self._impl.update_critic(
-            batch.observations,
-            batch.actions,
-            batch.next_rewards,
-            batch.next_observations,
-            batch.terminals,
-            batch.n_steps,
-            batch.masks,
-        )
-
-        actor_loss = self._impl.update_actor(batch.observations, batch.actions)
+        critic_loss = self._impl.update_critic(batch)
+        actor_loss = self._impl.update_actor(batch)
 
         if total_step % self._target_update_interval == 0:
             self._impl.update_critic_target()
             self._impl.update_actor_target()
 
-        return [critic_loss, actor_loss]
+        return {"critic_loss": critic_loss, "actor_loss": actor_loss}
 
-    def get_loss_labels(self) -> List[str]:
-        return ["critic_loss", "actor_loss"]
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.CONTINUOUS

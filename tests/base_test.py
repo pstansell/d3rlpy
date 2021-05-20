@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import numpy as np
 
+from d3rlpy.constants import ActionSpace
 from d3rlpy.dataset import MDPDataset, Transition, TransitionMiniBatch
 from d3rlpy.logger import D3RLPyLogger
 
@@ -43,11 +44,13 @@ def base_tester(model, impl, observation_shape, action_size=2):
 
     # check fit and fitter
     update_backup = model.update
-    model.update = Mock(return_value=range(len(model.get_loss_labels())))
+    model.update = Mock(return_value={"loss": np.random.random()})
     n_episodes = 4
     episode_length = 25
     n_batch = 32
-    n_epochs = 3
+    n_steps = 10
+    n_steps_per_epoch = 5
+    n_epochs = n_steps // n_steps_per_epoch
     data_size = n_episodes * episode_length
     model._batch_size = n_batch
     shape = (data_size,) + observation_shape
@@ -55,7 +58,10 @@ def base_tester(model, impl, observation_shape, action_size=2):
         observations = np.random.randint(256, size=shape, dtype=np.uint8)
     else:
         observations = np.random.random(shape).astype("f4")
-    actions = np.random.random((data_size, action_size))
+    if model.get_action_type() == ActionSpace.CONTINUOUS:
+        actions = np.random.random((data_size, action_size))
+    else:
+        actions = np.random.randint(action_size, size=data_size)
     rewards = np.random.random(data_size)
     terminals = np.zeros(data_size)
     for i in range(n_episodes):
@@ -65,7 +71,8 @@ def base_tester(model, impl, observation_shape, action_size=2):
     # check fit
     results = model.fit(
         dataset.episodes,
-        n_epochs=n_epochs,
+        n_steps=n_steps,
+        n_steps_per_epoch=n_steps_per_epoch,
         logdir="test_data",
         verbose=False,
         show_progress=False,
@@ -75,11 +82,11 @@ def base_tester(model, impl, observation_shape, action_size=2):
     assert len(results) == n_epochs
 
     # check if the correct number of iterations are performed
-    assert len(model.update.call_args_list) == data_size // n_batch * n_epochs
+    assert len(model.update.call_args_list) == n_steps
 
     # check arguments at each iteration
     for i, call in enumerate(model.update.call_args_list):
-        epoch = i // (data_size // n_batch)
+        epoch = i // n_steps_per_epoch
         total_step = i
         assert call[0][0] == epoch + 1
         assert call[0][1] == total_step
@@ -89,7 +96,8 @@ def base_tester(model, impl, observation_shape, action_size=2):
     # check fitter
     fitter = model.fitter(
         dataset.episodes,
-        n_epochs=n_epochs,
+        n_steps=n_steps,
+        n_steps_per_epoch=n_steps_per_epoch,
         logdir="test_data",
         verbose=False,
         show_progress=False,
@@ -183,6 +191,6 @@ def base_update_tester(model, observation_shape, action_size, discrete=False):
     model.create_impl(observation_shape, action_size)
     loss = model.update(0, 0, batch)
 
-    assert len(loss) == len(model.get_loss_labels())
+    assert len(loss.items()) > 0
 
     return transitions

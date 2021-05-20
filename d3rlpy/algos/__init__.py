@@ -2,15 +2,18 @@ from typing import Any, Dict, Type
 
 from .awac import AWAC
 from .awr import AWR, DiscreteAWR
-from .base import AlgoBase, DataGenerator
+from .base import AlgoBase
 from .bc import BC, DiscreteBC
 from .bcq import BCQ, DiscreteBCQ
 from .bear import BEAR
+from .combo import COMBO
 from .cql import CQL, DiscreteCQL
 from .crr import CRR
 from .ddpg import DDPG
 from .dqn import DQN, DoubleDQN
+from .mopo import MOPO
 from .plas import PLAS, PLASWithPerturbation
+from .random_policy import DiscreteRandomPolicy, RandomPolicy
 from .sac import SAC, DiscreteSAC
 from .td3 import TD3
 
@@ -24,18 +27,21 @@ __all__ = [
     "BCQ",
     "DiscreteBCQ",
     "BEAR",
+    "COMBO",
     "CQL",
     "DiscreteCQL",
     "CRR",
     "DDPG",
     "DQN",
     "DoubleDQN",
+    "MOPO",
     "PLAS",
     "PLASWithPerturbation",
     "SAC",
     "DiscreteSAC",
     "TD3",
-    "DataGenerator",
+    "RandomPolicy",
+    "DiscreteRandomPolicy",
     "get_algo",
     "create_algo",
 ]
@@ -49,6 +55,7 @@ DISCRETE_ALGORITHMS: Dict[str, Type[AlgoBase]] = {
     "dqn": DQN,
     "double_dqn": DoubleDQN,
     "sac": DiscreteSAC,
+    "random": DiscreteRandomPolicy,
 }
 
 CONTINUOUS_ALGORITHMS: Dict[str, Type[AlgoBase]] = {
@@ -57,12 +64,15 @@ CONTINUOUS_ALGORITHMS: Dict[str, Type[AlgoBase]] = {
     "bc": BC,
     "bcq": BCQ,
     "bear": BEAR,
+    "combo": COMBO,
     "cql": CQL,
     "crr": CRR,
     "ddpg": DDPG,
-    "sac": SAC,
+    "mopo": MOPO,
     "plas": PLASWithPerturbation,
+    "sac": SAC,
     "td3": TD3,
+    "random": RandomPolicy,
 }
 
 

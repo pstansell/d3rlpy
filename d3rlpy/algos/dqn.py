@@ -1,24 +1,21 @@
-from typing import Any, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from ..argument_utility import (
-    AugmentationArg,
     EncoderArg,
     QFuncArg,
     ScalerArg,
     UseGPUArg,
-    check_augmentation,
     check_encoder,
     check_q_func,
     check_use_gpu,
 )
-from ..augmentation import AugmentationPipeline
-from ..constants import IMPL_NOT_INITIALIZED_ERROR
+from ..constants import IMPL_NOT_INITIALIZED_ERROR, ActionSpace
 from ..dataset import TransitionMiniBatch
 from ..gpu import Device
 from ..models.encoders import EncoderFactory
 from ..models.optimizers import AdamFactory, OptimizerFactory
 from ..models.q_functions import QFunctionFactory
-from .base import AlgoBase, DataGenerator
+from .base import AlgoBase
 from .torch.dqn_impl import DoubleDQNImpl, DQNImpl
 
 
@@ -58,10 +55,6 @@ class DQN(AlgoBase):
             flag to use GPU, device ID or device.
         scaler (d3rlpy.preprocessing.Scaler or str): preprocessor.
             The available options are `['pixel', 'min_max', 'standard']`
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.dqn_impl.DQNImpl): algorithm implementation.
 
     """
@@ -73,7 +66,6 @@ class DQN(AlgoBase):
     _n_critics: int
     _target_reduction_type: str
     _target_update_interval: int
-    _augmentation: AugmentationPipeline
     _use_gpu: Optional[Device]
     _impl: Optional[DQNImpl]
 
@@ -93,8 +85,6 @@ class DQN(AlgoBase):
         target_update_interval: int = 8000,
         use_gpu: UseGPUArg = False,
         scaler: ScalerArg = None,
-        augmentation: AugmentationArg = None,
-        generator: Optional[DataGenerator] = None,
         impl: Optional[DQNImpl] = None,
         **kwargs: Any,
     ):
@@ -105,7 +95,6 @@ class DQN(AlgoBase):
             gamma=gamma,
             scaler=scaler,
             action_scaler=None,
-            generator=generator,
             kwargs=kwargs,
         )
         self._learning_rate = learning_rate
@@ -115,7 +104,6 @@ class DQN(AlgoBase):
         self._n_critics = n_critics
         self._target_reduction_type = target_reduction_type
         self._target_update_interval = target_update_interval
-        self._augmentation = check_augmentation(augmentation)
         self._use_gpu = check_use_gpu(use_gpu)
         self._impl = impl
 
@@ -134,29 +122,20 @@ class DQN(AlgoBase):
             target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()
 
     def update(
         self, epoch: int, total_step: int, batch: TransitionMiniBatch
-    ) -> List[Optional[float]]:
+    ) -> Dict[str, float]:
         assert self._impl is not None, IMPL_NOT_INITIALIZED_ERROR
-        loss = self._impl.update(
-            batch.observations,
-            batch.actions,
-            batch.next_rewards,
-            batch.next_observations,
-            batch.terminals,
-            batch.n_steps,
-            batch.masks,
-        )
+        loss = self._impl.update(batch)
         if total_step % self._target_update_interval == 0:
             self._impl.update_target()
-        return [loss]
+        return {"loss": loss}
 
-    def get_loss_labels(self) -> List[str]:
-        return ["value_loss"]
+    def get_action_type(self) -> ActionSpace:
+        return ActionSpace.DISCRETE
 
 
 class DoubleDQN(DQN):
@@ -202,10 +181,6 @@ class DoubleDQN(DQN):
             flag to use GPU, device ID or device.
         scaler (d3rlpy.preprocessing.Scaler or str): preprocessor.
             The available options are `['pixel', 'min_max', 'standard']`
-        augmentation (d3rlpy.augmentation.AugmentationPipeline or list(str)):
-            augmentation pipeline.
-        generator (d3rlpy.algos.base.DataGenerator): dynamic dataset generator
-            (e.g. model-based RL).
         impl (d3rlpy.algos.torch.dqn_impl.DoubleDQNImpl):
             algorithm implementation.
 
@@ -228,6 +203,5 @@ class DoubleDQN(DQN):
             target_reduction_type=self._target_reduction_type,
             use_gpu=self._use_gpu,
             scaler=self._scaler,
-            augmentation=self._augmentation,
         )
         self._impl.build()

@@ -2,7 +2,6 @@ import pytest
 import torch
 
 from d3rlpy.algos.torch.bcq_impl import BCQImpl, DiscreteBCQImpl
-from d3rlpy.augmentation import DrQPipeline
 from d3rlpy.models.encoders import DefaultEncoderFactory
 from d3rlpy.models.optimizers import AdamFactory
 from d3rlpy.models.q_functions import create_q_func_factory
@@ -33,7 +32,6 @@ from tests.algos.algo_test import (
 @pytest.mark.parametrize("beta", [0.5])
 @pytest.mark.parametrize("scaler", [None, DummyScaler()])
 @pytest.mark.parametrize("action_scaler", [None, DummyActionScaler()])
-@pytest.mark.parametrize("augmentation", [DrQPipeline()])
 def test_bcq_impl(
     observation_shape,
     action_size,
@@ -55,7 +53,6 @@ def test_bcq_impl(
     beta,
     scaler,
     action_scaler,
-    augmentation,
 ):
     impl = BCQImpl(
         observation_shape=observation_shape,
@@ -81,7 +78,6 @@ def test_bcq_impl(
         use_gpu=None,
         scaler=scaler,
         action_scaler=action_scaler,
-        augmentation=augmentation,
     )
     impl.build()
 
@@ -96,12 +92,6 @@ def test_bcq_impl(
 
     value = impl._predict_value(repeated_x, action)
     assert value.shape == (n_critics, 32 * n_action_samples, 1)
-
-    target = impl.compute_target(x)
-    if q_func_factory == "mean":
-        assert target.shape == (32, 1)
-    else:
-        assert target.shape == (32, impl._q_func.q_funcs[0]._n_quantiles)
 
     best_action = impl._predict_best_action(x)
     assert best_action.shape == (32, action_size)
@@ -121,7 +111,6 @@ def test_bcq_impl(
 @pytest.mark.parametrize("action_flexibility", [0.3])
 @pytest.mark.parametrize("beta", [1e-2])
 @pytest.mark.parametrize("scaler", [None])
-@pytest.mark.parametrize("augmentation", [DrQPipeline()])
 def test_discrete_bcq_impl(
     observation_shape,
     action_size,
@@ -135,7 +124,6 @@ def test_discrete_bcq_impl(
     action_flexibility,
     beta,
     scaler,
-    augmentation,
 ):
     impl = DiscreteBCQImpl(
         observation_shape=observation_shape,
@@ -151,7 +139,6 @@ def test_discrete_bcq_impl(
         beta=beta,
         use_gpu=None,
         scaler=scaler,
-        augmentation=augmentation,
     )
     torch_impl_tester(
         impl, discrete=True, deterministic_best_action=q_func_factory != "iqn"
