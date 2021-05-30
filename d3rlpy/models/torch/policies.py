@@ -211,6 +211,11 @@ class SquashedNormalPolicy(Policy):
 
         return squashed_action, log_prob
 
+    def sample_n_without_squash(self, x: torch.Tensor, n: int) -> torch.Tensor:
+        dist = self.dist(x)
+        action = dist.rsample((n,))
+        return action.transpose(0, 1)
+
     def onnx_safe_sample_n(self, x: torch.Tensor, n: int) -> torch.Tensor:
         h = self._encoder(x)
         mean = self._mu(h)
@@ -222,7 +227,7 @@ class SquashedNormalPolicy(Policy):
         expanded_std = std.view(-1, 1, self._action_size).repeat((1, n, 1))
 
         # sample noise from Gaussian distribution
-        noise = torch.randn(x.shape[0], n, self._action_size)
+        noise = torch.randn(x.shape[0], n, self._action_size, device=x.device)
 
         return torch.tanh(expanded_mean + noise * expanded_std)
 
